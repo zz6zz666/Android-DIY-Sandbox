@@ -11,7 +11,7 @@ AstrBot-Android-App 是一款基于 **[AstrBot](https://docs.astrbot.app/) 聊�
 ## 核心特性 ✨
 
 - **一键启动 🚀**：在 Android 设备上无需复杂配置，点击即可启动 AstrBot 服务。
-- **图形化配置 🖥️**：通过内置 WebView 直接访问 AstrBot 浏览器仪表盘，可视化配置 LLM 对接、消息平台适配、插件管理等功能（你也可以在浏览器输入 `http://localhost:端口名` 访问 AstrBot 仪表盘和 napcat 等容器的 Web 配置界面）。
+- **图形化配置 🖥️**：通过内置 WebView 直接访问 AstrBot 浏览器仪表盘，可视化配置 LLM 对接、消息平台适配、插件管理等功能（你也可以在本地浏览器输入 `http://localhost:端口名` [详见相应文档]访问 AstrBot 仪表盘和 napcat 等容器的 Web 配置界面）。
 - **多平台支持 🌐**：默认支持 QQ 个人账号消息平台，可参考 AstrBot 文档扩展至企业微信、Telegram、Discord 等多种平台。
 - **强大的 LLM 兼容 🧠**：支持对接 OpenAI、Llama、Gemini、Dify 等主流大语言模型。
 - **本地 Ubuntu 容器 🐧**：基于 Code LFA 提供的 Ubuntu 容器环境，保障 AstrBot 依赖的稳定性与兼容性。
