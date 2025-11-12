@@ -53,12 +53,20 @@ android {
             signingConfig signingConfigs.debug
             minifyEnabled true
             shrinkResources true
+            // 禁用对特定原生库的strip操作，避免处理错误
+            packagingOptions {
+                doNotStrip '**/libsudo.so'
+            }
         }
         debug {
             // signingConfig signingConfigs.release
             signingConfig signingConfigs.debug
             minifyEnabled false
             shrinkResources false
+            // 禁用对特定原生库的strip操作，避免处理错误
+            packagingOptions {
+                doNotStrip '**/libsudo.so'
+            }
         }
     }
 
