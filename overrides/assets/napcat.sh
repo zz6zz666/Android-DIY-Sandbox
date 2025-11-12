@@ -28,22 +28,6 @@ function log() {
     esac
 }
 
-function check_sudo() {
-    if ! command -v &> /dev/null; then
-        log "sudo不存在, 请手动安装: \n Centos: dnf install -y sudo\n Debian/Ubuntu: apt-get install -y sudo\n"
-        exit 1
-    fi
-}
-
-function check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        log "错误: 此脚本需要以 root 权限运行。"
-        log "请尝试使用 'bash ${0}' 或切换到 root 用户后运行。"
-        exit 1
-    fi
-    log "脚本正在以 root 权限运行。"
-}
-
 function detect_package_manager() {
     if command -v apt-get &> /dev/null; then
         package_manager="apt-get"
@@ -80,44 +64,6 @@ function install_dependency() {
         dnf install --allowerasing -y zip unzip jq curl xorg-x11-server-Xvfb screen procps-ng gcc-c++
     fi
     log "依赖安装成功..."
-}
-
-function network_test() {
-    local timeout=10
-    local status=0
-    local found=0
-    target_proxy=""
-    log "开始网络测试: Github..."
-
-    proxy_arr=("https://ghfast.top" "https://gh.wuliya.xin" "https://gh-proxy.com" "https://github.moeyy.xyz")
-    check_url="https://raw.githubusercontent.com/NapNeko/NapCatQQ/main/package.json"
-
-    for proxy in "${proxy_arr[@]}"; do
-        log "测试代理: ${proxy}"
-        status=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout*2)) -o /dev/null -s -w "%{http_code}" "${proxy}/${check_url}")
-        curl_exit=$?
-        if [ $curl_exit -ne 0 ]; then
-            log "代理 ${proxy} 测试失败或超时 (错误码: $curl_exit)"
-            continue
-        fi
-        if [ "${status}" = "200" ]; then
-            found=1
-            target_proxy="${proxy}"
-            log "将使用Github代理: ${proxy}"
-            break
-        fi
-    done
-
-    if [ ${found} -eq 0 ]; then
-        log "警告: 无法找到可用的Github代理，将尝试直连..."
-        status=$(curl -k --connect-timeout ${timeout} --max-time $((timeout*2)) -o /dev/null -s -w "%{http_code}" "${check_url}")
-        if [ $? -eq 0 ] && [ "${status}" = "200" ]; then
-            log "直连Github成功，将不使用代理"
-            target_proxy=""
-        else
-            log "警告: 无法连接到Github，请检查网络。将继续尝试安装，但可能会失败。"
-        fi
-    fi
 }
 
 function create_tmp_folder() {
@@ -262,8 +208,6 @@ function download_launcher_so() {
 
 clear
 log "NapCat Shell 安装脚本"
-# check_sudo
-check_root
 install_dependency
 download_napcat
 install_linuxqq

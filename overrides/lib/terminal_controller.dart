@@ -30,7 +30,7 @@ class HomeController extends GetxController {
   File progressFile = File('${RuntimeEnvir.tmpPath}/progress');
   File progressDesFile = File('${RuntimeEnvir.tmpPath}/progress_des');
   double progress = 0.0;
-  double step = 17;
+  double step = 8; // 修改为8个步骤（install_proot_distro, install_ubuntu, install_curl, network_test, install_uv, install_astrobot, install_napcat）
   String currentProgress = '';
 
   // 进度 +1
@@ -287,6 +287,44 @@ class HomeController extends GetxController {
   }
   */
 
+  Future<void> loadAstrBot() async {
+    syncProgress();
+    
+    // 创建相关文件夹
+    Directory(RuntimeEnvir.tmpPath).createSync(recursive: true);
+    Directory(RuntimeEnvir.homePath).createSync(recursive: true);
+    Directory(RuntimeEnvir.binPath).createSync(recursive: true);
+    
+    await initEnvir();
+    createBusyboxLink();
+    
+    // 创建终端
+    pseudoTerminal = createPTY(rows: terminal.viewHeight, columns: terminal.viewWidth);
+    pseudoTerminal!.output.cast<List<int>>().transform(const Utf8Decoder(allowMalformed: true)).listen((event) {
+      terminal.write(event);
+    });
+    
+    // 复制必要的文件
+    setProgress('复制 proot-distro...');
+    await AssetsUtils.copyAssetToPath('assets/proot-distro.zip', '${RuntimeEnvir.homePath}/proot-distro.zip');
+    bumpProgress();
+    
+    setProgress('复制 Ubuntu 系统镜像...');
+    await AssetsUtils.copyAssetToPath('assets/${Config.ubuntuFileName}', '${RuntimeEnvir.homePath}/${Config.ubuntuFileName}');
+    bumpProgress();
+    
+    // 写入并执行脚本
+    File('${RuntimeEnvir.homePath}/common.sh').writeAsStringSync('$commonScript');
+    
+    // 启动 AstrBot 安装和运行流程
+    startAstrBot(pseudoTerminal!);
+  }
+  
+  Future<void> startAstrBot(Pty pseudoTerminal) async {
+    setProgress('开始安装 AstrBot...');
+    pseudoTerminal.writeString('source ${RuntimeEnvir.homePath}/common.sh\nstart_vs_code\n');
+  }
+  
   @override
   void onInit() {
     super.onInit();
@@ -301,25 +339,9 @@ class HomeController extends GetxController {
           },
         ));
       }
-      syncProgress();
-      // 注释掉 code-server 相关的加载逻辑
-      // loadCodeServer();
       
-      // 创建基础环境但不启动 code-server
-      Directory(RuntimeEnvir.tmpPath).createSync(recursive: true);
-      Directory(RuntimeEnvir.homePath).createSync(recursive: true);
-      Directory(RuntimeEnvir.binPath).createSync(recursive: true);
-      await initEnvir();
-      createBusyboxLink();
-      
-      // 创建终端
-      pseudoTerminal = createPTY(rows: terminal.viewHeight, columns: terminal.viewWidth);
-      pseudoTerminal!.output.cast<List<int>>().transform(const Utf8Decoder(allowMalformed: true)).listen((event) {
-        terminal.write(event);
-      });
-      
-      // 启动一个基本的 bash shell
-      pseudoTerminal!.writeString('echo "Terminal initialized successfully"\nbash\n');
+      // 加载并启动 AstrBot
+      loadAstrBot();
     });
   }
 }

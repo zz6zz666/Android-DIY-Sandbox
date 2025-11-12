@@ -72,15 +72,14 @@ Future<Map<String, String>> getHardLinkMapByArchive(String tarGzPath) async {
   return result;
 }
 
-// 注释掉与code-server相关的MethodChannel
-// MethodChannel _channel = const MethodChannel('vscode_channel');
-
 // 注释掉与code-server相关的WebView函数
 // /// 打开 WebView
 // /// Opens the WebView
 // void openWebView() {
 //   _channel.invokeMethod('open_webview');
 // }
+// 为了获取Apk So库路径，我们需要一个MethodChannel
+MethodChannel _channel = const MethodChannel('astrobot_channel');
 
 /// 获取 Apk So 库路径
 /// Gets the path of the Apk So library
