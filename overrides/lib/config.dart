@@ -1,5 +1,5 @@
-const bool product = false;
-const String debugCSV = '000';
+const bool product = bool.fromEnvironment('dart.vm.product');
+const String debugCSV = '4.103.1';
 
 class Config {
   static const String packageName = 'com.astrobot.code_lfa';
