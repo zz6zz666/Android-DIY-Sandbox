@@ -3,15 +3,29 @@
 export UV_LINK_MODE=copy
 export UV_DEFAULT_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
 
+progress_echo(){
+  echo -e "\033[31m- $@\033[0m"
+  echo "$@" > "$TMPDIR/progress_des"
+}
+
+bump_progress(){
+  current=0
+  if [ -f "$TMPDIR/progress" ]; then
+    current=$(cat "$TMPDIR/progress" 2>/dev/null || echo 0)
+  fi
+  next=$((current + 1))
+  printf "$next" > "$TMPDIR/progress"
+}
+
 install_sudo_curl_git(){
   curl_path=`which curl`
   if [ -z "$curl_path" ]; then
-    echo "curl $L_NOT_INSTALLED, $L_INSTALLING..."
+    progress_echo "curl $L_NOT_INSTALLED, $L_INSTALLING..."
     apt-get update
     apt-get install -y sudo
     sudo apt-get install -y curl git
   else
-    echo "sudo curl $L_INSTALLED"
+    progress_echo "curl $L_INSTALLED"
   fi
 }
 
@@ -56,6 +70,7 @@ function network_test() {
 install_uv(){
   INSTALL_DIR="$HOME/.local/bin"
   if [ ! -x "$INSTALL_DIR/uv" ]; then
+    progress_echo "uv $L_NOT_INSTALLED，$L_INSTALLING..."
     network_test
     APP_NAME="uv"
     APP_VERSION="0.9.8"
@@ -102,16 +117,16 @@ install_uv(){
 
     # 清理临时文件
     rm -rf $TMP_DIR
-    echo "$APP_NAME 安装完成"
   else
-    echo "$APP_NAME $L_INSTALLED"
+    progress_echo "uv $L_INSTALLED"
   fi
 }
 
 install_napcat(){
-  local INSTALL_DIR="$HOME/napcat"
   # 检查是否已安装
-  if [ ! -d "$INSTALL_DIR" ]; then
+  if [ ! -f "$HOME/launcher.sh" ]; then
+    progress_echo "Napcat $L_NOT_INSTALLED，$L_INSTALLING..."
+    rm -rf $HOME/napcat
     cd $HOME
     echo "Napcat $L_NOT_INSTALLED，$L_INSTALLING..."
     curl -o napcat.sh https://raw.githubusercontent.com/NapNeko/napcat-linux-installer/refs/heads/main/install.sh
@@ -120,8 +135,35 @@ install_napcat(){
       exit 1
     fi
     bash napcat.sh
+    
+  echo "写入 onebot11.json默认配置文件"
+  cat > "$HOME/config/onebot11.json" <<'EOF'
+{
+  "network": {
+    "httpServers": [],
+    "httpClients": [],
+    "websocketServers": [],
+    "websocketClients": [
+      {
+        "name": "WsClient",
+        "enable": false,
+        "url": "ws://localhost:6199",
+        "messagePostFormat": "array",
+        "reportSelfMessage": false,
+        "reconnectInterval": 5000,
+        "token": "kasdkfljsadhlskdjhasdlkfshdlafksjdhf",
+        "debug": false,
+        "heartInterval": 30000
+      }
+    ]
+  },
+  "musicSignUrl": "",
+  "enableLocalFile2Url": false,
+  "parseMultMsg": false
+}
+EOF
   else
-    echo "Napcat $L_INSTALLED"
+    progress_echo "Napcat $L_INSTALLED"
   fi
 
 }
@@ -132,7 +174,7 @@ install_astrobot(){
   # 检查是否已安装
   if [ ! -d "$INSTALL_DIR" ]; then
     cd $HOME
-    echo "Astrobot $L_NOT_INSTALLED，$L_INSTALLING..."
+    progress_echo "Astrobot $L_NOT_INSTALLED，$L_INSTALLING..."
     network_test
 
     # 克隆仓库（失败直接退出）
@@ -141,31 +183,27 @@ install_astrobot(){
       echo "克隆 AstrBot 仓库失败"
       exit 1
     fi
-    echo "Astrobot $L_INSTALLED"
   else
-    echo "AstrBot $L_INSTALLED"
+    progress_echo "AstrBot $L_INSTALLED"
   fi
   
   # 启动 AstrBot（失败直接退出）
-  echo "正在启动 AstrBot..."
+  progress_echo "AstrBot 配置中"
   cd $INSTALL_DIR
   if ! $HOME/.local/bin/uv sync; then
     echo "uv 依赖同步失败"
     exit 1
   fi
-  if ! $HOME/.local/bin/uv run main.py 2>/dev/null; then
+  if ! $HOME/.local/bin/uv run main.py; then
     echo "AstrBot 启动失败"
     exit 1
   fi
-  
-  echo "AstrBot 启动成功"
 }
 
 install_sudo_curl_git
+bump_progress
 install_uv
+bump_progress
 install_napcat
+bump_progress
 install_astrobot
-
-echo "正在启动 NapcatQQ..."
-cd $HOME
-bash launcher.sh
