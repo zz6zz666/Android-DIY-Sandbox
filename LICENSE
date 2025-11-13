@@ -1,13 +1,28 @@
-AstrBot-Android-App 许可证说明
+BSD 3-Clause License
 
-本项目采用多许可证组合，具体如下：
+Copyright (c) 2023, nightmare-space
 
-### AstrBot 相关模块
-遵循 AGPL-v3 许可证（因深度集成 AstrBot 框架，需遵守其开源协议要求）。
-商业使用规则：若修改后用于商业性质网络服务，必须开源修改内容；若需闭源商业使用，需联系 community@astrbot.app 申请商业授权。
-AGPL-v3 完整许可证内容请参见：https://www.gnu.org/licenses/agpl-3.0.html
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
 
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
 
-### Code LFA 衍生的容器环境模块
-遵循 BSD-3-Clause 许可证（尊重原始 Code LFA 项目的开源协议）。
-BSD-3-Clause 完整许可证内容请参见：https://opensource.org/licenses/BSD-3-Clause
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
