@@ -151,7 +151,7 @@ start_astrbot(){
   sleep 1
   bump_progress
 
-  copy_scripts
+  copy_files
   login_ubuntu "
     export TMPDIR='${RuntimeEnvir.tmpPath}';
     export L_NOT_INSTALLED='${S.current.uninstalled}';

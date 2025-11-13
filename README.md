@@ -34,35 +34,16 @@ AstrBot-Android-App 是一款基于 **[AstrBot](https://docs.astrbot.app/) 聊�
 5. 启动机器人，即可在对应消息平台上体验 AI 聊天能力 💬。
 
 
-## 项目结构说明 📂
-
-```
-AstrBot-Android-App/
-├── code_lfa-1.6.1/       # 基于 Code LFA 的 Ubuntu 容器环境基础 🐳
-├── git_repos/            # dart 依赖库，包括 Code LFA 作者创建的共享库
-├── overrides/
-│   ├── assets/
-│   │   ├── AstrBot-4.5.4.zip   # AstrBot 框架核心资源包 📦
-│   │   └── napcat.sh           # napcat 消息平台适配器 (qq) 安装脚本 📜
-│   └── lib/
-│       ├── config.dart
-│       ├── script.dart
-│       ├── terminal_controller.dart  
-│       └── utils.dart
-├── build.bat               # Windows 构建脚本 🪟
-├── build.sh                # Linux/Mac 构建脚本 🐧
-└── README.md               # 项目说明文档（你正在阅读的内容） 📖
-```
-
-
 ## 开发与构建 🔨
 
 如果你想对项目进行二次开发或自行构建，可以执行以下步骤：
+
 
 ### 依赖安装 📥
 确保你的开发环境已安装：
 - Flutter SDK  🎯
 - Android SDK
+
 
 ### 构建步骤 🛠️
 1. 克隆本项目仓库：
@@ -70,21 +51,19 @@ AstrBot-Android-App/
    git clone https://github.com/zz6zz666/AstrBot-Android-App.git
    cd AstrBot-Android-App
    ```
-
-2. 执行构建脚本：
-   - Windows：`./build.bat`
-   - Linux/Mac：`./build.sh`
-
-3. 构建完成后，在 `./build_output` 目录下找到生成的 APK 文件，安装到 Android 设备即可 📱。
+2. 执行构建命令：
+   ```bash
+   flutter build apk
+   ```
+   或调试命令：
+   ```bash
+   flutter run
+   ```
 
 
 ## 许可证说明 📜
 
-本项目采用**多许可证组合**，具体如下：
-
-- **AstrBot 相关模块**：遵循 **AGPL-v3 许可证**（因深度集成 AstrBot 框架，需遵守其开源协议要求）。
-  - 商业使用规则：若修改后用于商业性质网络服务，必须开源修改内容；若需闭源商业使用，需联系 `community@astrbot.app` 申请商业授权。
-- **Code LFA 衍生的容器环境模块**：遵循 **BSD-3-Clause 许可证**（尊重原始 Code LFA 项目的开源协议）。
+本项目采用 **BSD-3-Clause 许可证**，尊重根基项目 Code LFA 的开源协议。
 
 
 ## 致谢 🙏
