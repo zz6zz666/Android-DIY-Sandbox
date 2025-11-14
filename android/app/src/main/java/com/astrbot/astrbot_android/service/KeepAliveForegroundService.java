@@ -87,10 +87,11 @@ public class KeepAliveForegroundService extends Service {
                 .setContentTitle("AstrBot正在运行")
                 .setContentText("应用正在后台保持运行状态")
                 .setSmallIcon(R.drawable.ic_notification)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
                 .setOngoing(true)
                 .setAutoCancel(false)
-                .setOnlyAlertOnce(true);
+                .setOnlyAlertOnce(true)
+                .setSilent(true);
 
         Notification notification = builder.build();
         notification.flags |= Notification.FLAG_ONGOING_EVENT | Notification.FLAG_NO_CLEAR;
