@@ -187,6 +187,7 @@ install_astrbot(){
     fi
     mkdir AstrBot/data
     cp cmd_config.json AstrBot/data
+    chmod +w AstrBot/data/cmd_config.json
     echo "拷贝 cmd_config.json 默认配置文件"
   else
     progress_echo "AstrBot $L_INSTALLED"
