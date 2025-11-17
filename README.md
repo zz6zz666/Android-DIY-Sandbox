@@ -141,7 +141,7 @@
 
 ### 🌐 网络要求
 
- - 首次启动必须在 **网络通畅的环境** 下进行  
+ - `首次启动`必须在 **网络通畅的环境** 下进行  
  - 推荐使用 **家用 Wi-Fi 或手机 5G 流量**  
  - ❌ 避免使用校园网、公司内网、公共 Wi-Fi 等限速或受限网络，可能导致资源下载失败  
 
@@ -246,7 +246,7 @@
 
 ## 📲 **立即体验**  
  - 123 云盘：如果你不知道如何访问 github，请从 123 云盘的 [**分享链接**](https://www.123865.com/s/N4mNjv-OubQ3) 下载（小白推荐）。  
- - GitHub 仓库：[https://github.com/AstrBotDevs/AstrBot-Android-App](https://github.com/AstrBotDevs/AstrBot-Android-App)  在 release 页面下载最新版本 `.apk` 文件安装即可使用
+ - GitHub 仓库：[https://github.com/zz6zz666/AstrBot-Android-App](https://github.com/zz6zz666/AstrBot-Android-App)  在 release 页面下载最新版本 `.apk` 文件安装即可使用
 
 ---
 
