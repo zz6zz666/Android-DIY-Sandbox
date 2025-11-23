@@ -1,6 +1,6 @@
 import 'package:global_repository/global_repository.dart';
-import 'config.dart';
-import 'generated/l10n.dart';
+import '../config/app_config.dart';
+import '../../generated/l10n.dart';
 
 // ubuntu path (保持原有路径结构，但不再使用 proot-distro)
 // ubuntu path (keep original path structure, but no longer use proot-distro)
@@ -104,6 +104,18 @@ install_ubuntu(){
 
   if [ "$NEED_INSTALL" -eq 1 ] || [ -z "$(ls -A $UBUNTU_PATH 2>/dev/null)" ]; then
     echo "[state] $UBUNTU_PATH not ready, reinstalling"
+    
+    # 备份用户数据到Android持久化目录
+    PERSISTENT_BACKUP="${RuntimeEnvir.homePath}/ubuntu_user_backup"
+    echo "[backup] 检查并备份用户数据..."
+    
+    # 备份整个 /root 目录（包含所有用户数据）
+    if [ -d "$UBUNTU_PATH/root" ]; then
+      echo "[backup] 备份 /root 目录..."
+      mkdir -p "$PERSISTENT_BACKUP"
+      cp -r "$UBUNTU_PATH/root" "$PERSISTENT_BACKUP/root_backup"
+    fi
+
     rm -rf "$UBUNTU_PATH"
     mkdir -p "$UBUNTU_PATH"
     if [[ "$UBUNTU" == *.tar.xz ]]; then
@@ -136,6 +148,14 @@ install_ubuntu(){
     # 注释掉 code-server 相关的 PATH 设置
     # echo 'export PATH=/opt/code-server-$CSVERSION-linux-arm64/bin:$PATH' >> $UBUNTU_PATH/root/.bashrc
     echo 'export ANDROID_DATA=/home/' >> $UBUNTU_PATH/root/.bashrc
+    
+    # 恢复用户数据
+    if [ -d "$PERSISTENT_BACKUP/root_backup" ]; then
+      echo "[restore] 恢复用户数据..."
+      mkdir -p "$UBUNTU_PATH/root"
+      cp -r "$PERSISTENT_BACKUP/root_backup"/* "$UBUNTU_PATH/root/"
+      rm -rf "$PERSISTENT_BACKUP"
+    fi
   else
     echo "[state] $UBUNTU_PATH not empty, skip extraction"
     VERSION=`cat $UBUNTU_PATH/etc/issue.net 2>/dev/null`

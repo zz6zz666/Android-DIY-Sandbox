@@ -38,15 +38,14 @@
             </intent-filter>
         </activity>
         
-        <service
-            android:name=".service.KeepAliveForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
         <meta-data
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />
+        <meta-data
+            android:name="com.astrbot.astrbot_android.ic_launcher"
+            android:resource="@mipmap/ic_launcher" />
     </application>
 </manifest>
