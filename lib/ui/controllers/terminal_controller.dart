@@ -18,7 +18,7 @@ import '../routes/app_routes.dart';
 class HomeController extends GetxController {
   // bool vsCodeStaring = false;
   SettingNode privacySetting = 'privacy'.setting;
-  SettingNode lastQQNumber = 'last_qq_number'.setting;
+  SettingNode napCatWebUiEnabled = 'napcat_webui_enabled'.setting;
   Pty? pseudoTerminal;
   Pty? napcatTerminal;
 
@@ -69,11 +69,8 @@ class HomeController extends GetxController {
 
   // 使用 login_ubuntu 函数，传入要执行的命令
   // Use login_ubuntu function, passing the command to execute
-  // 添加 -q 参数启用快速登录，如果有保存的登录状态会自动使用
   String get command {
-    final savedQQ = lastQQNumber.get();
-    final quickLogin = savedQQ != null ? '-q $savedQQ' : '';
-    return 'source ${RuntimeEnvir.homePath}/common.sh\nlogin_ubuntu "bash /root/launcher.sh $quickLogin"\n';
+    return 'source ${RuntimeEnvir.homePath}/common.sh\nlogin_ubuntu "bash /root/launcher.sh"\n';
   }
 
   // 监听输出，当输出中包含启动成功的标志时，启动 Code Server
@@ -159,16 +156,6 @@ class HomeController extends GetxController {
         }
       }
 
-      // 捕获可用于快速登录的 QQ 号（格式如 "1. 3639403092 Operer"）
-      final qqMatch = RegExp(r'^\d+\.\s+(\d+)\s+\w+', multiLine: true).firstMatch(event);
-      if (qqMatch != null && event.contains('可用于快速登录')) {
-        final qqNumber = qqMatch.group(1);
-        if (qqNumber != null) {
-          lastQQNumber.set(qqNumber);
-          Log.i('保存 QQ 号用于下次快速登录: $qqNumber', tag: 'AstrBot');
-        }
-      }
-
       // 检测指令1显示二维码
       if (event.contains('二维码已保存到') && !_isQrcodeShowing.value) {
         _isQrcodeShowing.value = true;
@@ -228,6 +215,37 @@ class HomeController extends GetxController {
         // 取消订阅，后续不再监听任何指令
         await _qrcodeSubscription?.cancel();
         _qrcodeSubscription = null; // 置空标记已取消
+      }
+
+      // 检测指令3处理登录错误
+      if (event.contains('Login Error') && _isQrcodeShowing.value) {
+        // 关闭二维码对话框
+        if (_qrcodeDialog != null) {
+          Get.back();
+          _isQrcodeShowing.value = false;
+          _qrcodeDialog = null;
+        }
+
+        // 提取错误信息
+        String errorMsg = '登录失败';
+        if (event.contains('"message":"')) {
+          final match = RegExp(r'"message":"([^"]+)"').firstMatch(event);
+          if (match != null) {
+            errorMsg = match.group(1) ?? errorMsg;
+          }
+        }
+
+        // 显示错误提示
+        Get.snackbar(
+          'NapCat 登录失败',
+          errorMsg,
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.red.withOpacity(0.8),
+          colorText: Colors.white,
+          duration: const Duration(seconds: 5),
+        );
+
+        // 不取消订阅，允许用户重新扫码
       }
     });
   }

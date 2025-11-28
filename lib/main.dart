@@ -7,7 +7,7 @@ import 'package:global_repository/global_repository.dart';
 import 'package:settings/settings.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import 'generated/l10n.dart';
+import 'generated/l10n.dart';  
 import 'core/config/app_config.dart';
 import 'core/services/foreground_service.dart';
 import 'ui/routes/app_routes.dart';

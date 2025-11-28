@@ -7,6 +7,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:global_repository/global_repository.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:archive/archive_io.dart';
 import '../../controllers/terminal_controller.dart';
 import '../../../core/constants/scripts.dart' as scripts;
 
@@ -82,12 +83,18 @@ class _WebViewPageState extends State<WebViewPage> {
           },
         ),
       )
-      ..loadRequest(Uri.parse('http://0.0.0.0:6185'));
+      ..loadRequest(Uri.parse('http://127.0.0.1:6185'));
 
     if (_astrBotController.platform is AndroidWebViewController) {
       AndroidWebViewController.enableDebugging(true);
-      (_astrBotController.platform as AndroidWebViewController)
+      final androidController = _astrBotController.platform as AndroidWebViewController;
+      androidController
           .setMediaPlaybackRequiresUserGesture(false);
+      // 设置混合内容模式以提高兼容性（Android 9+ 需要）
+      androidController.setMixedContentMode(MixedContentMode.compatibilityMode);
+      // 允许访问本地文件和内容
+      androidController.setAllowFileAccess(true);
+      androidController.setAllowContentAccess(true);
     }
 
     _astrBotController.addJavaScriptChannel(
@@ -116,26 +123,36 @@ class _WebViewPageState extends State<WebViewPage> {
         ),
       );
 
+    // 检查 WebUI 是否启用
+    final bool webUiEnabled = homeController.napCatWebUiEnabled.get() ?? false;
+    
+
     // 监听 Token 变化
     ever(homeController.napCatWebUiToken, (String token) {
       if (token.isNotEmpty) {
-        final url = 'http://0.0.0.0:6099/webui?token=$token';
+        final url = 'http://127.0.0.1:6099/webui?token=$token';
         _napCatController.loadRequest(Uri.parse(url));
       }
     });
 
     // 初始加载
     if (homeController.napCatWebUiToken.isNotEmpty) {
-      final url = 'http://0.0.0.0:6099/webui?token=${homeController.napCatWebUiToken.value}';
+      final url = 'http://127.0.0.1:6099/webui?token=${homeController.napCatWebUiToken.value}';
       _napCatController.loadRequest(Uri.parse(url));
     } else {
-      _napCatController.loadRequest(Uri.parse('http://0.0.0.0:6099/webui'));
+      _napCatController.loadRequest(Uri.parse('http://127.0.0.1:6099/webui'));
     }
 
     if (_napCatController.platform is AndroidWebViewController) {
       AndroidWebViewController.enableDebugging(true);
-      (_napCatController.platform as AndroidWebViewController)
+      final androidController = _napCatController.platform as AndroidWebViewController;
+      androidController
           .setMediaPlaybackRequiresUserGesture(false);
+      // 设置混合内容模式以提高兼容性（Android 9+ 需要）
+      androidController.setMixedContentMode(MixedContentMode.compatibilityMode);
+      // 允许访问本地文件和内容
+      androidController.setAllowFileAccess(true);
+      androidController.setAllowContentAccess(true);
     }
   }
 
@@ -203,7 +220,7 @@ class _WebViewPageState extends State<WebViewPage> {
       final backupFileName = 'AstrBot-backup-$timestamp.tar.gz';
       final backupPath = '${backupDir.path}/$backupFileName';
       
-      // 使用 tar 命令压缩 data 目录
+      // 数据目录路径
       final dataPath = '${scripts.ubuntuPath}/root/AstrBot/data';
       final dataDir = Directory(dataPath);
       
@@ -218,14 +235,13 @@ class _WebViewPageState extends State<WebViewPage> {
         return false;
       }
       
-      // 执行备份命令
-      final result = await Process.run(
-        '${RuntimeEnvir.binPath}/busybox',
-        ['tar', '-czf', backupPath, '-C', '${scripts.ubuntuPath}/root/AstrBot', 'data'],
-      );
+      // 使用 archive 包创建 tar.gz 压缩文件
+      final encoder = TarFileEncoder();
+      encoder.tarDirectory(dataDir, filename: backupPath);
       
-      if (result.exitCode == 0) {
-        final backupFile = File(backupPath);
+      // 检查备份文件
+      final backupFile = File(backupPath);
+      if (await backupFile.exists()) {
         final fileSize = await backupFile.length();
         final fileSizeMB = (fileSize / 1024 / 1024).toStringAsFixed(2);
         
@@ -240,12 +256,12 @@ class _WebViewPageState extends State<WebViewPage> {
       } else {
         Get.snackbar(
           '备份失败',
-          '错误: ${result.stderr}',
+          '备份文件创建失败',
           snackPosition: SnackPosition.BOTTOM,
           backgroundColor: Colors.red,
           colorText: Colors.white,
         );
-        Log.e('备份失败: ${result.stderr}', tag: 'AstrBot');
+        Log.e('备份失败: 文件不存在', tag: 'AstrBot');
         return false;
       }
     } catch (e) {
@@ -262,6 +278,9 @@ class _WebViewPageState extends State<WebViewPage> {
   }
 
   Future<void> _handleBackPress() async {
+    // 检查 NapCat WebUI 是否启用
+    final bool napCatEnabled = homeController.napCatWebUiEnabled.get() ?? false;
+    
     // 如果当前是 AstrBot 页面且 WebView 可回退，则回退
     if (_currentIndex == 0 && await _astrBotController.canGoBack()) {
       await _astrBotController.goBack();
@@ -269,7 +288,7 @@ class _WebViewPageState extends State<WebViewPage> {
     }
     
     // 如果当前是 NapCat 页面且 WebView 可回退，则回退
-    if (_currentIndex == 1 && await _napCatController.canGoBack()) {
+    if (napCatEnabled && _currentIndex == 1 && await _napCatController.canGoBack()) {
       await _napCatController.goBack();
       return;
     }
@@ -307,6 +326,35 @@ class _WebViewPageState extends State<WebViewPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    // 检查 NapCat WebUI 是否启用
+    final bool napCatEnabled = homeController.napCatWebUiEnabled.get() ?? false;
+    
+    // 动态构建页面列表
+    final List<Widget> pages = [
+      // 1. AstrBot 配置页面
+      WebViewWidget(controller: _astrBotController),
+      
+      // 2. NapCat 配置页面（仅在启用时添加）
+      if (napCatEnabled) WebViewWidget(controller: _napCatController),
+    ];
+    
+    // 动态构建导航栏项目
+    final List<BottomNavigationBarItem> navItems = [
+      const BottomNavigationBarItem(
+        icon: Icon(Icons.smart_toy),
+        label: 'AstrBot',
+      ),
+      if (napCatEnabled)
+        const BottomNavigationBarItem(
+          icon: Icon(Icons.pets),
+          label: 'NapCat',
+        ),
+      const BottomNavigationBarItem(
+        icon: Icon(Icons.settings),
+        label: '设置',
+      ),
+    ];
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
@@ -326,11 +374,7 @@ class _WebViewPageState extends State<WebViewPage> {
             child: IndexedStack(
               index: _currentIndex,
               children: [
-                // 1. AstrBot 配置页面
-                WebViewWidget(controller: _astrBotController),
-                
-                // 2. NapCat 配置页面
-                WebViewWidget(controller: _napCatController),
+                ...pages,
                 
                 // 3. 软件设置页面
                 ListView(
@@ -350,8 +394,8 @@ class _WebViewPageState extends State<WebViewPage> {
                     ),
                     ListTile(
                       leading: const Icon(Icons.restart_alt),
-                      title: const Text('重新安装 AstrBot'),
-                      subtitle: const Text('清空所有 AstrBot 数据并重新安装'),
+                      title: const Text('更新或重装 AstrBot'),
+                      subtitle: const Text('清除 AstrBot 组件并重新安装最新版本'),
                       onTap: () async {
                         // 首先询问是否需要备份
                         final backupChoice = await Get.dialog<String>(
@@ -386,8 +430,12 @@ class _WebViewPageState extends State<WebViewPage> {
                             barrierDismissible: false,
                           );
                           
-                          final backupSuccess = await _performBackup();
-                          Get.back(); // 关闭加载提示
+                          bool backupSuccess = false;
+                          try {
+                            backupSuccess = await _performBackup();
+                          } finally {
+                            Get.back(); // 关闭加载提示
+                          }
                           
                           if (!backupSuccess) {
                             // 备份失败，询问是否继续
@@ -434,32 +482,29 @@ class _WebViewPageState extends State<WebViewPage> {
                         
                         if (finalConfirm == true) {
                           try {
-                            // 删除 AstrBot 相关目录
-                            final ubuntuPath = '${RuntimeEnvir.homePath}/distro/ubuntu';
-                            final ubuntuDir = Directory(ubuntuPath);
-                            if (await ubuntuDir.exists()) {
-                              await ubuntuDir.delete(recursive: true);
-                            }
-                            
-                            // 删除进度文件
-                            final progressFile = File('${RuntimeEnvir.tmpPath}/progress');
-                            final progressDesFile = File('${RuntimeEnvir.tmpPath}/progress_des');
-                            if (await progressFile.exists()) {
-                              await progressFile.delete();
-                            }
-                            if (await progressDesFile.exists()) {
-                              await progressDesFile.delete();
+                            // 删除 AstrBot 目录（~/AstrBot）
+                            final astrBotPath = '${scripts.ubuntuPath}/root/AstrBot';
+                            final astrBotDir = Directory(astrBotPath);
+                            if (await astrBotDir.exists()) {
+                              await astrBotDir.delete(recursive: true);
+                              Log.i('已删除 AstrBot 目录: $astrBotPath', tag: 'AstrBot');
                             }
                             
                             if (context.mounted) {
                               Get.snackbar(
-                                '重新安装成功',
-                                '请重启应用以重新安装 AstrBot',
+                                '重装成功',
+                                '应用将自动退出，请重新启动',
                                 snackPosition: SnackPosition.BOTTOM,
-                                duration: const Duration(seconds: 3),
+                                duration: const Duration(seconds: 2),
                               );
+                              
+                              // 2秒后自动退出应用
+                              Future.delayed(const Duration(seconds: 2), () {
+                                exit(0);
+                              });
                             }
                           } catch (e) {
+                            Log.e('重新安装 AstrBot 失败: $e', tag: 'AstrBot');
                             if (context.mounted) {
                               Get.snackbar(
                                 '重新安装失败',
@@ -475,8 +520,8 @@ class _WebViewPageState extends State<WebViewPage> {
                     ),
                     ListTile(
                       leading: const Icon(Icons.refresh),
-                      title: const Text('重新安装 NapcatQQ'),
-                      subtitle: const Text('清空 NapcatQQ 安装文件并重新安装'),
+                      title: const Text('更新或重装 NapcatQQ'),
+                      subtitle: const Text('清除 NapcatQQ 组件并重新安装最新版本'),
                       onTap: () async {
                         // 显示确认对话框
                         final confirm = await Get.dialog<bool>(
@@ -508,11 +553,16 @@ class _WebViewPageState extends State<WebViewPage> {
                             
                             if (context.mounted) {
                               Get.snackbar(
-                                '重新安装成功',
-                                '请重启应用以重新安装 NapcatQQ',
+                                '重装成功',
+                                '应用将自动退出，请重新启动',
                                 snackPosition: SnackPosition.BOTTOM,
-                                duration: const Duration(seconds: 3),
+                                duration: const Duration(seconds: 2),
                               );
+                              
+                              // 2秒后自动退出应用
+                              Future.delayed(const Duration(seconds: 2), () {
+                                exit(0);
+                              });
                             }
                           } catch (e) {
                             Log.e('重新安装 NapcatQQ 失败: $e', tag: 'AstrBot');
@@ -530,64 +580,68 @@ class _WebViewPageState extends State<WebViewPage> {
                       },
                     ),
                     ListTile(
-                      leading: const Icon(Icons.logout),
-                      title: const Text('退出 QQ 登录'),
-                      subtitle: const Text('清除 QQ 登录状态，保留 NapCat'),
-                      onTap: () async {
-                        // 显示确认对话框
-                        final confirm = await Get.dialog<bool>(
-                          AlertDialog(
-                            title: const Text('确认退出登录'),
-                            content: const Text('此操作将清除 QQ 登录状态，下次启动需要重新登录。NapCat 本身不会被删除。'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Get.back(result: false),
-                                child: const Text('取消'),
-                              ),
-                              TextButton(
-                                onPressed: () => Get.back(result: true),
-                                child: const Text('确定', style: TextStyle(color: Colors.orange)),
-                              ),
-                            ],
-                          ),
-                        );
+                      leading: const Icon(Icons.dashboard),
+                      title: const Text('前往 NapCat 仪表盘'),
+                      subtitle: const Text('在 NapCat 仪表盘中管理 QQ 登录状态'),
+                      onTap: () {
+                        // 检查 NapCat WebUI 是否启用
+                        final bool napCatEnabled = homeController.napCatWebUiEnabled.get() ?? false;
                         
-                        if (confirm == true) {
-                          try {
-                            // 删除 NapCat QQ 登录数据目录
-                            final napcatDataPath = '${scripts.ubuntuPath}/root/napcat/data';
-                            final napcatDataDir = Directory(napcatDataPath);
-                            if (await napcatDataDir.exists()) {
-                              await napcatDataDir.delete(recursive: true);
-                              Log.i('已删除 NapCat 登录数据: $napcatDataPath', tag: 'AstrBot');
-                            }
-                            
-                            // 清空保存的 QQ 号
-                            homeController.lastQQNumber.set(null);
-                            Log.i('已清空保存的 QQ 号', tag: 'AstrBot');
-                            
-                            if (context.mounted) {
-                              Get.snackbar(
-                                '退出成功',
-                                '已清除 QQ 登录状态，请重启应用',
-                                snackPosition: SnackPosition.BOTTOM,
-                                duration: const Duration(seconds: 3),
-                              );
-                            }
-                          } catch (e) {
-                            Log.e('退出登录失败: $e', tag: 'AstrBot');
-                            if (context.mounted) {
-                              Get.snackbar(
-                                '退出失败',
-                                e.toString(),
-                                snackPosition: SnackPosition.BOTTOM,
-                                backgroundColor: Colors.red,
-                                colorText: Colors.white,
-                              );
-                            }
-                          }
+                        if (!napCatEnabled) {
+                          Get.snackbar(
+                            '无法访问',
+                            'NapCat WebUI 未启用，请先在下方开关中启用',
+                            snackPosition: SnackPosition.BOTTOM,
+                            backgroundColor: Colors.orange,
+                            colorText: Colors.white,
+                            duration: const Duration(seconds: 3),
+                          );
+                          return;
                         }
+                        
+                        // 切换到 NapCat 标签页（索引 1）
+                        setState(() {
+                          _currentIndex = 1;
+                        });
+                        
+                        Get.snackbar(
+                          '已跳转',
+                          '请在 NapCat 仪表盘中管理 QQ 登录',
+                          snackPosition: SnackPosition.BOTTOM,
+                          duration: const Duration(seconds: 2),
+                        );
                       },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.web),
+                      title: const Text('NapCat WebUI'),
+                      subtitle: const Text('启用或禁用 NapCat 网页控制面板（默认关闭）'),
+                      trailing: Switch(
+                        value: homeController.napCatWebUiEnabled.get() ?? false,
+                        onChanged: (bool value) {
+                          homeController.napCatWebUiEnabled.set(value);
+                          
+                          // 如果当前在 NapCat 页面且禁用了，切换到 AstrBot 页面
+                          if (!value && _currentIndex == 1) {
+                            _currentIndex = 0;
+                          }
+                          
+                          // 重新初始化 NapCat controller
+                          _initNapCatController();
+                          
+                          // 立即刷新 UI
+                          setState(() {});
+                          
+                          Get.snackbar(
+                            value ? 'WebUI 已启用' : 'WebUI 已禁用',
+                            value 
+                              ? 'NapCat 标签页已显示，可以立即访问控制面板'
+                              : 'NapCat 标签页已隐藏',
+                            snackPosition: SnackPosition.BOTTOM,
+                            duration: const Duration(seconds: 2),
+                          );
+                        },
+                      ),
                     ),
                     ListTile(
                       leading: const Icon(Icons.backup),
@@ -599,8 +653,11 @@ class _WebViewPageState extends State<WebViewPage> {
                           barrierDismissible: false,
                         );
                         
-                        await _performBackup();
-                        Get.back(); // 关闭加载提示
+                        try {
+                          await _performBackup();
+                        } finally {
+                          Get.back(); // 关闭加载提示
+                        }
                       },
                     ),
                     ListTile(
@@ -637,7 +694,7 @@ class _WebViewPageState extends State<WebViewPage> {
             ),
           ),
           bottomNavigationBar: BottomNavigationBar(
-            currentIndex: _currentIndex,
+            currentIndex: _currentIndex >= navItems.length ? navItems.length - 1 : _currentIndex,
             onTap: (index) {
               setState(() {
                 _currentIndex = index;
@@ -646,20 +703,7 @@ class _WebViewPageState extends State<WebViewPage> {
             backgroundColor: Colors.white,
             selectedItemColor: Theme.of(context).primaryColor,
             unselectedItemColor: Colors.grey,
-            items: const [
-              BottomNavigationBarItem(
-                icon: Icon(Icons.smart_toy),
-                label: 'AstrBot',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.pets), // Cat icon for NapCat
-                label: 'NapCat',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.settings),
-                label: '设置',
-              ),
-            ],
+            items: navItems,
           ),
         ),
       ),

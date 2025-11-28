@@ -236,11 +236,22 @@ install_astrbot(){
     network_test
 
     # 克隆仓库（失败直接退出）
-    echo "正在克隆 AstrBot 仓库..."
+    echo "正在获取 AstrBot 最新版本..."
 
+    # 获取最新的 tag
+    LATEST_TAG=$(git ls-remote --tags --sort='-v:refname' ${target_proxy:+${target_proxy}/}https://github.com/AstrBotDevs/AstrBot.git | head -n 1 | awk -F'/' '{print $3}')
+    
+    if [ -z "$LATEST_TAG" ]; then
+      echo "警告: 无法获取最新 tag，使用 main 分支"
+      CLONE_BRANCH="main"
+    else
+      echo "最新版本: $LATEST_TAG"
+      CLONE_BRANCH="$LATEST_TAG"
+    fi
     
     # 克隆到临时目录
-    if ! git clone ${target_proxy:+${target_proxy}/}https://github.com/AstrBotDevs/AstrBot.git "$CLONE_TEMP_DIR"; then
+    echo "正在克隆 AstrBot 仓库 (分支/标签: $CLONE_BRANCH)..."
+    if ! git clone --depth=1 --branch "$CLONE_BRANCH" ${target_proxy:+${target_proxy}/}https://github.com/AstrBotDevs/AstrBot.git "$CLONE_TEMP_DIR"; then
       echo "克隆 AstrBot 仓库失败"
       rm -rf "$CLONE_TEMP_DIR"  # 清理失败的临时目录
       exit 1
@@ -261,6 +272,21 @@ install_astrbot(){
         if tar -xzf "$LATEST_BACKUP" -C "$CLONE_TEMP_DIR"; then
           echo "备份恢复成功"
           progress_echo "AstrBot 数据已从备份恢复"
+          
+          # 扫描所有插件的 requirements.txt 并安装到 venv
+          echo "扫描插件依赖..."
+          if [ -d "$CLONE_TEMP_DIR/data/plugins" ]; then
+            for plugin_dir in "$CLONE_TEMP_DIR/data/plugins"/*; do
+              if [ -d "$plugin_dir" ] && [ -f "$plugin_dir/requirements.txt" ]; then
+                echo "发现插件依赖: $plugin_dir/requirements.txt"
+                if [ -f "$HOME/.local/bin/uv" ]; then
+                  cd "$CLONE_TEMP_DIR"
+                  echo "安装插件依赖: $(basename "$plugin_dir")..."
+                  $HOME/.local/bin/uv pip install -r "$plugin_dir/requirements.txt" 2>/dev/null || echo "警告: 插件依赖安装失败，将在启动时重试"
+                fi
+              fi
+            done
+          fi
         else
           echo "备份恢复失败，使用默认配置"
           cp cmd_config.json "$CLONE_TEMP_DIR/data"
@@ -289,13 +315,34 @@ install_astrbot(){
   # 启动 AstrBot（失败直接退出）
   progress_echo "AstrBot 配置中"
   cd $INSTALL_DIR
-  if ! $HOME/.local/bin/uv sync; then
-    echo "uv 依赖同步失败"
+  if [ ! -f "$HOME/.local/bin/uv" ]; then
+    echo "uv 未找到"
     exit 1
   fi
-  if ! $HOME/.local/bin/uv run main.py; then
-    echo "AstrBot 启动失败"
+  
+  # 使用 uv sync 同步依赖
+  echo "同步 AstrBot 依赖..."
+  if ! $HOME/.local/bin/uv sync; then
+    echo "依赖同步失败"
     exit 1
+  fi
+  
+  # 首次启动使用 uv run main.py（会自动同步依赖）
+  # 非首次启动使用 uv run --no-sync main.py（跳过依赖同步）
+  if [ ! -f "$INSTALL_DIR/.uv_synced" ]; then
+    echo "首次启动 AstrBot..."
+    if ! $HOME/.local/bin/uv run main.py; then
+      echo "AstrBot 启动失败"
+      exit 1
+    fi
+    # 标记已同步
+    touch "$INSTALL_DIR/.uv_synced"
+  else
+    echo "非首次启动 AstrBot，跳过依赖同步..."
+    if ! $HOME/.local/bin/uv run --no-sync main.py; then
+      echo "AstrBot 启动失败"
+      exit 1
+    fi
   fi
 }
 

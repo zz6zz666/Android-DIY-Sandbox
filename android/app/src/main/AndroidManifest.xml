@@ -47,5 +47,23 @@
         <meta-data
             android:name="com.astrbot.astrbot_android.ic_launcher"
             android:resource="@mipmap/ic_launcher" />
+        
+        <!-- Flutter Foreground Service -->
+        <service 
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+        
+        <!-- Ubuntu Documents Provider -->
+        <provider
+            android:name=".UbuntuDocumentsProvider"
+            android:authorities="com.astrbot.astrbot_android.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
     </application>
 </manifest>
