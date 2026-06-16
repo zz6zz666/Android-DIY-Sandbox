@@ -28,11 +28,11 @@
 ## 🫧 关于泡泡版？
 
 本项目基于[**AstrBot-Android-App**](https://github.com/zz6zz666/AstrBot-Android-App)进行重构，解决了下面问题：
-1、修复了启动卡在**配置中**的bug
-2、安装分步进行，不再一次安装，减少出错概率。首次启动请在主页点击**环境管理**进行安装
-3、增加多NapCat账号管理，泡泡版支持部署多个BOT
-4、优化了使用体验
-5、与原版共存，与原版数据隔离
+- 修复了启动卡在**配置中**的bug
+- 安装分步进行，不再一次安装，减少出错概率。首次启动请在主页点击**环境管理**进行安装
+- 增加多NapCat账号管理，泡泡版支持部署多个BOT
+- 优化了使用体验
+- 与原版共存，与原版数据隔离
 ---
 
 ## 🌐 什么是 AstrBot？
@@ -189,7 +189,7 @@
 
 ## 📲 **立即体验**  
  - 百度网盘：[**分享链接**](https://pan.baidu.com/s/1Oqq1FAoigr_JraUTlTYRbQ?pwd=POPO)
- - 夸克网盘：[**分享链接**](https://pan.baidu.com/s/1Oqq1FAoigr_JraUTlTYRbQ?pwd=POPO)
+ - 夸克网盘：[**分享链接**](https://pan.quark.cn/s/db60dbae73a8) 提取码：tkqk
  - GitHub 仓库：[GitHub](https://github.com/MuFengDR/AstrBot-Bubble-Android-App)  在 release 页面下载最新版本 `.apk` 文件安装即可使用
 
 ---
