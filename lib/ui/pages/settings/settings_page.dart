@@ -1090,9 +1090,9 @@ class _SettingsPageState extends State<SettingsPage> {
         Obx(() {
           final controller = Get.find<HomeController>();
           return _buildOpacitySlider(
-            title: '状态栏透明度',
-            subtitle: '调整状态栏下方背景遮罩强度',
-            icon: Icons.phone_android_outlined,
+            title: '设置背景遮罩',
+            subtitle: '调整设置页全屏背景遮罩强度',
+            icon: Icons.filter_b_and_w_outlined,
             value: controller.statusOverlayOpacity.value,
             onChanged: controller.setStatusOverlayOpacity,
           );

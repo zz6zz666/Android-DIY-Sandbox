@@ -61,7 +61,6 @@ class _MainPageState extends State<MainPage> {
     return Obx(
       () => BubbleBackground(
         imagePath: homeController.homeBackgroundPath.value,
-        statusOverlayOpacity: homeController.statusOverlayOpacity.value,
         child: Scaffold(
           backgroundColor: Colors.transparent,
           extendBody: true,
@@ -73,22 +72,33 @@ class _MainPageState extends State<MainPage> {
   }
 
   Widget _buildSettingsPage() {
-    return Column(
+    return Stack(
       children: [
-        GlassAppBar(
-          title: '设置',
-          opacity: homeController.topNavGlassOpacity.value,
-          blur: homeController.glassBlurAmount.value * 30,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: _closeSettings,
+        Positioned.fill(
+          child: ColoredBox(
+            color: Colors.white.withValues(
+              alpha: homeController.statusOverlayOpacity.value,
+            ),
           ),
         ),
-        Expanded(
-          child: SettingsPage(
-            astrBotController: WebViewPage.astrBotController,
-            napCatController: WebViewPage.napCatController,
-          ),
+        Column(
+          children: [
+            GlassAppBar(
+              title: '设置',
+              opacity: homeController.topNavGlassOpacity.value,
+              blur: homeController.glassBlurAmount.value * 30,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: _closeSettings,
+              ),
+            ),
+            Expanded(
+              child: SettingsPage(
+                astrBotController: WebViewPage.astrBotController,
+                napCatController: WebViewPage.napCatController,
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -131,7 +141,7 @@ class _MainPageState extends State<MainPage> {
               NavigationDestination(
                 icon: Icon(Icons.smart_toy_outlined),
                 selectedIcon: Icon(Icons.smart_toy),
-                label: '主页',
+                label: '涓婚〉',
               ),
               NavigationDestination(
                 icon: Icon(Icons.language_outlined),
@@ -141,7 +151,7 @@ class _MainPageState extends State<MainPage> {
               NavigationDestination(
                 icon: Icon(Icons.terminal_outlined),
                 selectedIcon: Icon(Icons.terminal),
-                label: '终端',
+                label: '缁堢',
               ),
             ],
           ),

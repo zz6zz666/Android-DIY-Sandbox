@@ -5,13 +5,11 @@ import 'package:flutter/material.dart';
 
 class BubbleBackground extends StatelessWidget {
   final String imagePath;
-  final double statusOverlayOpacity;
   final Widget child;
 
   const BubbleBackground({
     super.key,
     required this.imagePath,
-    this.statusOverlayOpacity = 0.38,
     required this.child,
   });
 
@@ -30,19 +28,6 @@ class BubbleBackground extends StatelessWidget {
           )
         else
           const _BubbleGradient(),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.white.withValues(alpha: statusOverlayOpacity),
-                Colors.white.withValues(alpha: statusOverlayOpacity * 0.48),
-                Colors.black.withValues(alpha: 0.10),
-              ],
-            ),
-          ),
-        ),
         child,
       ],
     );
