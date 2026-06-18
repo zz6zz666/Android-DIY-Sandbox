@@ -141,7 +141,7 @@ class _MainPageState extends State<MainPage> {
               NavigationDestination(
                 icon: Icon(Icons.smart_toy_outlined),
                 selectedIcon: Icon(Icons.smart_toy),
-                label: '涓婚〉',
+                label: '主页',
               ),
               NavigationDestination(
                 icon: Icon(Icons.language_outlined),
@@ -151,7 +151,7 @@ class _MainPageState extends State<MainPage> {
               NavigationDestination(
                 icon: Icon(Icons.terminal_outlined),
                 selectedIcon: Icon(Icons.terminal),
-                label: '缁堢',
+                label: '终端',
               ),
             ],
           ),
