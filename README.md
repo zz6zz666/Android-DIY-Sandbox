@@ -188,8 +188,8 @@
 ---
 
 ## 📲 **立即体验**  
- - 百度网盘：[**分享链接**](https://pan.baidu.com/s/1Oqq1FAoigr_JraUTlTYRbQ?pwd=POPO)
- - 夸克网盘：[**分享链接**](https://pan.quark.cn/s/db60dbae73a8) 提取码：tkqk
+ - 百度网盘：[**分享链接**](https://pan.baidu.com/s/1s7bR2WeRmOKZmHHAGgcsQQ?pwd=POPO)
+ - 夸克网盘：[**分享链接**](https://pan.quark.cn/s/af1ee9aaffb8?pwd=PjbJ)
  - GitHub 仓库：[GitHub](https://github.com/MuFengDR/AstrBot-Bubble-Android-App)  在 release 页面下载最新版本 `.apk` 文件安装即可使用
 
 ---
