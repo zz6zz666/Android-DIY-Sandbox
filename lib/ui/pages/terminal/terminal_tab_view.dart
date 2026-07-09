@@ -65,9 +65,7 @@ class _TerminalTabViewState extends State<TerminalTabView> {
   }
 
   String _fullLogText(TerminalTab tab) {
-    return tab.type == TerminalTabType.fixed
-        ? homeController.startupLogText.trim()
-        : tab.logText.trim();
+    return tab.logText.trim();
   }
 
   Future<void> _copySelected(
@@ -128,9 +126,6 @@ class _TerminalTabViewState extends State<TerminalTabView> {
     tab.clearLog();
     // 同时向容器发送 clear, 清理提示符与残留输出
     tab.pty?.writeString('clear\n');
-    if (tab.type == TerminalTabType.fixed) {
-      homeController.clearStartupLog();
-    }
     _showTopSnack(context, '终端已清空');
   }
 

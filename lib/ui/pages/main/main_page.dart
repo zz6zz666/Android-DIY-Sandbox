@@ -7,7 +7,6 @@ import '../../lua/lua_view.dart';
 import '../../widgets/glass_panel.dart';
 import '../settings/settings_page.dart';
 import '../terminal/terminal_tab_view.dart';
-import '../webview/webview_page.dart';
 import '../webview/webview_tab_view.dart';
 
 class MainPage extends StatefulWidget {
@@ -118,10 +117,7 @@ class _MainPageState extends State<MainPage> {
               ),
             ),
             Expanded(
-              child: SettingsPage(
-                astrBotController: WebViewPage.astrBotController,
-                napCatController: WebViewPage.napCatController,
-              ),
+              child: SettingsPage(),
             ),
           ],
         ),
