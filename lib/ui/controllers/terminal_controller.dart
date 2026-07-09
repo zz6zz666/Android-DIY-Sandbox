@@ -18,6 +18,7 @@ import '../../core/constants/scripts.dart';
 import '../../core/utils/file_utils.dart';
 import '../routes/app_routes.dart';
 import 'terminal_tab_manager.dart';
+import 'webview_tab_manager.dart';
 
 class NapCatInstanceDefaults {
   static const String storageKey = 'napcat_instances';
@@ -89,6 +90,11 @@ enum BotBindingConfigState {
 class HomeController extends GetxController {
   // 终端标签页管理器
   late final TerminalTabManager terminalTabManager;
+  // 通用 WebUI 标签页管理器 (无 AstrBot/NapCat 语义)
+  final WebViewTabManager webViewTabManager = WebViewTabManager();
+  // 再次点击当前导航图标的信号: 终端页弹出更多菜单; WebUI 页切换二级浏览器工具栏
+  final RxInt terminalMenuSignal = 0.obs;
+  final RxBool webviewToolbarVisible = false.obs;
   // bool vsCodeStaring = false;
   SettingNode privacySetting = 'privacy'.setting;
   SettingNode napCatWebUiEnabled = 'napcat_webui_enabled'.setting;
@@ -150,7 +156,7 @@ class HomeController extends GetxController {
     _terminalWriteTimer = null;
     _terminalWriteBuffer = '';
     terminal = _createMainTerminal();
-    terminalTabManager.initializeFixedTab(terminal);
+    // 不再常驻只读 Main 终端标签; 终端标签全部由动作(spawn)按需创建。
   }
 
   String get startupLogText => _startupLogText;
@@ -810,19 +816,10 @@ class HomeController extends GetxController {
         ubuntuAssetFile.path,
       );
     }
-    await AssetsUtils.copyAssetToPath('assets/astrbot-startup.sh',
-        '${RuntimeEnvir.homePath}/astrbot-startup.sh');
     await AssetsUtils.copyAssetToPath(
         'assets/cmd_config.json', '${RuntimeEnvir.homePath}/cmd_config.json');
 
     final appVersion = await getAppVersion();
-    final startupScriptFile =
-        File('${RuntimeEnvir.homePath}/astrbot-startup.sh');
-    if (await startupScriptFile.exists()) {
-      var scriptContent = await startupScriptFile.readAsString();
-      scriptContent = scriptContent.replaceAll('{{VERSION}}', appVersion);
-      await startupScriptFile.writeAsString(_toUnixLineEndings(scriptContent));
-    }
 
     File('${RuntimeEnvir.homePath}/common.sh').writeAsStringSync(
       _toUnixLineEndings(getCommonScript(appVersion)),
@@ -856,11 +853,6 @@ class HomeController extends GetxController {
           },
         ));
       }
-
-      // 加载并启动 AstrBot
-      // 在终端创建完成后初始化固定标签页
-      // 等待terminal创建完成
-      terminalTabManager.initializeFixedTab(terminal);
     });
 
     // 监听应用生命周期状态变化
@@ -2232,6 +2224,163 @@ LD_PRELOAD=./libnapcat_launcher.so qq --no-sandbox
     } catch (e) {
       Log.e('同步账号 webui.json 失败: ${file.path}, $e', tag: 'AstrBot-Napcat');
     }
+  }
+
+  /// 供 Lua 脚本调用: 在 Ubuntu 容器内执行一条命令并等待结束。
+  Future<void> runShellCommand(String command) => _runUbuntuShell(command);
+
+  /// 供 Lua 脚本调用: 某 NapCat 实例是否正在运行 (有活动 Pty)。
+  bool isNapCatRunning(String id) => _napCatInstanceTerminals.containsKey(id);
+
+  /// 确保容器脚本就绪 (bin 链接 + rootfs 包 + cmd_config + common.sh 原语)。
+  Future<void> ensureContainerScripts() async {
+    Directory(RuntimeEnvir.tmpPath).createSync(recursive: true);
+    Directory(RuntimeEnvir.homePath).createSync(recursive: true);
+    Directory(RuntimeEnvir.binPath).createSync(recursive: true);
+    await initEnvir();
+    createBusyboxLink();
+    final ubuntuAssetFile =
+        File('${RuntimeEnvir.homePath}/${Config.ubuntuFileName}');
+    if (!await ubuntuAssetFile.exists()) {
+      await AssetsUtils.copyAssetToPath(
+        'assets/${Config.ubuntuFileName}',
+        ubuntuAssetFile.path,
+      );
+    }
+    await AssetsUtils.copyAssetToPath(
+        'assets/cmd_config.json', '${RuntimeEnvir.homePath}/cmd_config.json');
+    final appVersion = await getAppVersion();
+    File('${RuntimeEnvir.homePath}/common.sh').writeAsStringSync(
+      _toUnixLineEndings(getCommonScript(appVersion)),
+    );
+  }
+
+  /// 原语: 解压/初始化 Ubuntu rootfs (进容器前的准备), 流式输出到终端 tab。
+  Future<void> installRootfs({
+    String title = '初始化容器',
+    void Function()? onExit,
+  }) async {
+    await ensureContainerScripts();
+    await terminalTabManager.addCommandTerminalTab(
+      title: title,
+      command: 'source ${RuntimeEnvir.homePath}/common.sh\n'
+          'install_ubuntu\n'
+          'echo __ROOTFS_DONE__\n',
+      onDoneMarker: '__ROOTFS_DONE__',
+      onCommandDone: onExit,
+    );
+  }
+
+  /// 通用 spawn 运行态跟踪 (无 AstrBot/NapCat 语义, 按调用方给的 key)。
+  final RxInt spawnRevision = 0.obs;
+  final Map<String, bool> spawnRunning = {};
+  final Map<String, String> _spawnTabIds = {};
+
+  bool isSpawnRunning(String key) => spawnRunning[key] == true;
+
+  void _setSpawnRunning(String? key, bool value) {
+    if (key == null) return;
+    spawnRunning[key] = value;
+    spawnRevision.value++;
+  }
+
+  /// 原语: 在容器内运行一条(可长驻)命令, 流式输出到新终端 tab。
+  /// key 非空时跟踪运行态 (标签活着=运行中; 命令退出或标签被关=停止)。
+  Future<void> spawnContainer(
+    String command, {
+    String title = '容器任务',
+    String? key,
+    void Function()? onExit,
+  }) async {
+    await ensureContainerScripts();
+    const marker = '__SPAWN_DONE__';
+    final tabId = await terminalTabManager.addCommandTerminalTab(
+      title: title,
+      command: 'source ${RuntimeEnvir.homePath}/common.sh\n'
+          'install_ubuntu\n'
+          'copy_config\n'
+          'login_ubuntu ${_shellSingleQuote(command)}\n'
+          'echo $marker\n',
+      onDoneMarker: marker,
+      onCommandDone: () {
+        if (key != null) _spawnTabIds.remove(key);
+        _setSpawnRunning(key, false);
+        onExit?.call();
+      },
+    );
+    if (key != null && tabId.isNotEmpty) _spawnTabIds[key] = tabId;
+    _setSpawnRunning(key, true);
+  }
+
+  /// 停止 key 对应的 spawn (关闭其终端 tab 并 kill 进程)。
+  void stopSpawn(String key) {
+    final id = _spawnTabIds.remove(key);
+    if (id != null) terminalTabManager.closeTabById(id);
+    _setSpawnRunning(key, false);
+  }
+
+  /// 新建一个交互式终端标签页 (进入容器 bash)。
+  /// 末尾的 clear 会被喂给已进入的 ubuntu 交互 bash (而非外层容器),
+  /// 从而清掉安装/登录过程的噪声, 得到干净的 root 提示符。
+  Future<void> newTerminalTab() async {
+    await ensureContainerScripts();
+    final n = terminalTabManager.tabs.length + 1;
+    final cmd = 'source ${RuntimeEnvir.homePath}/common.sh\n'
+        'install_ubuntu\n'
+        'copy_config\n'
+        "login_ubuntu 'bash'\n"
+        'clear\n';
+    await terminalTabManager.addCommandTerminalTab(title: '终端 $n', command: cmd);
+  }
+
+  /// 供 Lua 脚本调用: 在容器内执行命令并捕获输出与退出码。
+  /// 返回 { 'code': int, 'output': String }。用唯一标记框住真实输出, 过滤 PTY 回显与提示符。
+  Future<Map<String, dynamic>> runShellCapture(
+    String command, {
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    const startMark = '__EXEC_START_7f3a2b__';
+    const endMark = '__EXEC_END_7f3a2b__';
+    final pty = createPTY();
+    final done = Completer<void>();
+    final buffer = StringBuffer();
+    final sub = pty.output.listen(
+      (data) {
+        buffer.write(utf8.decode(data, allowMalformed: true));
+        if (buffer.toString().contains('$endMark:')) {
+          if (!done.isCompleted) done.complete();
+        }
+      },
+      onDone: () {
+        if (!done.isCompleted) done.complete();
+      },
+      onError: (_) {
+        if (!done.isCompleted) done.complete();
+      },
+    );
+    final wrapped = 'echo $startMark; $command; echo "$endMark:\$?"';
+    pty.writeString(
+      'source ${RuntimeEnvir.homePath}/common.sh\n'
+      'login_ubuntu ${_shellSingleQuote(wrapped)}\n'
+      'exit\n',
+    );
+    await done.future.timeout(timeout, onTimeout: () {});
+    await sub.cancel();
+    pty.kill();
+
+    final raw = buffer.toString();
+    var code = -1;
+    var out = raw;
+    final startIdx = raw.lastIndexOf(startMark);
+    if (startIdx >= 0) {
+      final afterStart = raw.substring(startIdx + startMark.length);
+      final endIdx = afterStart.indexOf(endMark);
+      out = endIdx >= 0 ? afterStart.substring(0, endIdx) : afterStart;
+    }
+    final endMatch = RegExp('$endMark:(\\d+)').firstMatch(raw);
+    if (endMatch != null) code = int.tryParse(endMatch.group(1) ?? '') ?? -1;
+    out = out.replaceAll(RegExp(r'\x1B\[[0-9;?]*[ -/]*[@-~]'), '').trim();
+    return {'code': code, 'output': out};
   }
 
   Future<void> _runUbuntuShell(String command) async {

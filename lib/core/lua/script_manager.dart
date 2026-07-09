@@ -1,0 +1,545 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle, Clipboard, ClipboardData;
+import 'package:get/get.dart';
+import 'package:global_repository/global_repository.dart';
+import 'package:settings/settings.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../constants/scripts.dart' show ubuntuPath;
+import '../../ui/controllers/terminal_controller.dart';
+import '../../ui/lua/lua_view.dart';
+import 'lua_engine.dart';
+import 'lua_prelude.dart';
+
+/// Lua 脚本运行时管理器: 加载/执行脚本, 注册 host 能力, 维护页面与导航注册表。
+class ScriptManager {
+  ScriptManager._();
+  static final ScriptManager instance = ScriptManager._();
+
+  /// 内置默认脚本版本; 每次修改 assets/scripts/main.lua 后 +1 以触发重新释放。
+  static const String _defaultScriptsVersion = '13';
+
+  final LuaEngine _engine = LuaEngine();
+  final Map<String, LuaFunctionRef> _pages = {};
+  List<Map<String, dynamic>> _navTabs = [];
+  bool _initialized = false;
+  String? lastError;
+
+  /// 反应式状态: Lua 页面通过 state(key,default) 读写; 变化时递增触发所有 LuaPage 重建。
+  final RxInt stateRevision = 0.obs;
+  final Map<String, dynamic> _luaState = {};
+
+  bool get initialized => _initialized;
+  List<Map<String, dynamic>> get navTabs => _navTabs;
+  List<String> get pageNames => _pages.keys.toList();
+
+  String get scriptsDir => '${RuntimeEnvir.configPath}/scripts';
+
+  Future<void> initialize() async {
+    if (_initialized) return;
+    _engine.open();
+    _registerHandlers();
+    await _releaseDefaultScripts();
+    try {
+      _engine.doString(kLuaPrelude, chunkName: 'prelude');
+      _loadUserScripts();
+      _initialized = true;
+    } catch (e) {
+      lastError = '$e';
+      debugPrint('[ScriptManager] 加载脚本失败: $e');
+    }
+  }
+
+  /// 热重载: 清空注册表并重新执行磁盘脚本。
+  Future<void> reload() async {
+    _pages.clear();
+    _navTabs = [];
+    _initialized = false;
+    // 重新开一个干净的 lua_State, 避免残留全局
+    _engine.close();
+    await initialize();
+  }
+
+  Future<void> _releaseDefaultScripts() async {
+    final dir = Directory(scriptsDir);
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final main = File('${dir.path}/main.lua');
+    final marker = File('${dir.path}/.default_version');
+    final installedVer =
+        marker.existsSync() ? marker.readAsStringSync().trim() : '';
+    // 内置默认脚本版本变化时重新释放 (施工期覆盖; 后续可改为仅覆盖未修改文件)
+    if (!main.existsSync() || installedVer != _defaultScriptsVersion) {
+      final content = await rootBundle.loadString('assets/scripts/main.lua');
+      main.writeAsStringSync(content);
+      marker.writeAsStringSync(_defaultScriptsVersion);
+      debugPrint('[ScriptManager] 已释放默认脚本 (v$_defaultScriptsVersion) 到 ${main.path}');
+    }
+  }
+
+  void _loadUserScripts() {
+    final main = File('$scriptsDir/main.lua');
+    if (main.existsSync()) {
+      _engine.doString(main.readAsStringSync(), chunkName: 'main.lua');
+    }
+  }
+
+  /// 调用指定页面的 build(ctx) 函数, 返回声明式描述 (Map/List)。
+  Object? buildPage(String name, Map<String, dynamic> ctx) {
+    final fn = _pages[name];
+    if (fn == null) return null;
+    return fn.call([ctx]);
+  }
+
+  /// 采集当前应用实时状态, 供 Lua build(ctx) 使用。
+  Map<String, dynamic> buildCtx() {
+    HomeController? hc;
+    try {
+      hc = Get.find<HomeController>();
+    } catch (_) {}
+    return {
+      // 通用运行态 (spawn key -> bool); 读 spawnRevision 建立反应式依赖
+      'running': hc == null
+          ? const <String, dynamic>{}
+          : (() {
+              hc!.spawnRevision.value;
+              return Map<String, dynamic>.from(hc!.spawnRunning);
+            })(),
+    };
+  }
+
+  // ==================== host 处理函数 ====================
+
+  void _registerHandlers() {
+    final e = _engine;
+    LuaFunctionRef? cbOf(List<Object?> a, int i) =>
+        a.length > i && a[i] is LuaFunctionRef ? a[i] as LuaFunctionRef : null;
+    e.registerHandler('register_page', (a) {
+      final name = a.isNotEmpty ? a[0]?.toString() ?? '' : '';
+      final fn = a.length > 1 ? a[1] : null;
+      if (name.isNotEmpty && fn is LuaFunctionRef) _pages[name] = fn;
+      return null;
+    });
+    e.registerHandler('nav_tabs', (a) {
+      final list = a.isNotEmpty ? a[0] : null;
+      if (list is List) {
+        _navTabs = [
+          for (final t in list)
+            if (t is Map) Map<String, dynamic>.from(t),
+        ];
+      }
+      return null;
+    });
+
+    e.registerHandler('log', (a) {
+      debugPrint('[Lua] ${a.isNotEmpty ? a[0] : ''}');
+      return null;
+    });
+    e.registerHandler('toast', (a) {
+      final msg = a.isNotEmpty ? '${a[0]}' : '';
+      _toast(msg);
+      return null;
+    });
+    e.registerHandler('confirm', (a) {
+      final msg = a.isNotEmpty ? '${a[0]}' : '';
+      final cb = a.length > 1 && a[1] is LuaFunctionRef ? a[1] as LuaFunctionRef : null;
+      _confirm(msg, cb);
+      return null;
+    });
+    e.registerHandler('input', (a) {
+      final opts = a.isNotEmpty && a[0] is Map ? a[0] as Map : const {};
+      final cb = a.length > 1 && a[1] is LuaFunctionRef ? a[1] as LuaFunctionRef : null;
+      _input(opts, cb);
+      return null;
+    });
+    e.registerHandler('exit_app', (_) {
+      Future.delayed(const Duration(milliseconds: 300), () => exit(0));
+      return null;
+    });
+
+    // 设置存储
+    e.registerHandler('get_setting', (a) {
+      if (a.isEmpty) return null;
+      return a[0].toString().setting.get();
+    });
+    e.registerHandler('set_setting', (a) {
+      if (a.length < 2) return null;
+      a[0].toString().setting.set(a[1]);
+      stateRevision.value++;
+      return null;
+    });
+
+    // 路径
+    e.registerHandler('ubuntu_path', (_) => ubuntuPath);
+    e.registerHandler('home_path', (_) => RuntimeEnvir.homePath);
+
+    // 文件系统
+    e.registerHandler('read_file', (a) {
+      if (a.isEmpty) return null;
+      final f = File('${a[0]}');
+      return f.existsSync() ? f.readAsStringSync() : null;
+    });
+    e.registerHandler('write_file', (a) {
+      if (a.length < 2) return false;
+      File('${a[0]}').writeAsStringSync('${a[1]}');
+      return true;
+    });
+    e.registerHandler('exists', (a) {
+      if (a.isEmpty) return false;
+      final p = '${a[0]}';
+      return File(p).existsSync() || Directory(p).existsSync();
+    });
+    e.registerHandler('delete_dir', (a) {
+      if (a.isEmpty) return false;
+      final d = Directory('${a[0]}');
+      if (d.existsSync()) d.deleteSync(recursive: true);
+      return true;
+    });
+    e.registerHandler('delete_file', (a) {
+      if (a.isEmpty) return false;
+      final f = File('${a[0]}');
+      if (f.existsSync()) f.deleteSync();
+      return true;
+    });
+
+    // 容器 / AstrBot 控制
+    e.registerHandler('container', (a) {
+      if (a.isEmpty) return null;
+      final cmd = '${a[0]}';
+      final cb = a.length > 1 && a[1] is LuaFunctionRef ? a[1] as LuaFunctionRef : null;
+      final hc = _home();
+      if (hc != null) {
+        hc.runShellCommand(cmd).then((_) => cb?.call());
+      }
+      return null;
+    });
+    e.registerHandler('exec', (a) {
+      if (a.isEmpty) return null;
+      final cmd = '${a[0]}';
+      final cb = a.length > 1 && a[1] is LuaFunctionRef ? a[1] as LuaFunctionRef : null;
+      final hc = _home();
+      if (hc == null) {
+        cb?.call([
+          {'code': -1, 'output': 'HomeController 未就绪'}
+        ]);
+        return null;
+      }
+      hc.runShellCapture(cmd).then((res) => cb?.call([res]));
+      return null;
+    });
+
+    e.registerHandler('webview_open', (a) {
+      final hc = _home();
+      if (hc == null || a.isEmpty) return null;
+      final url = '${a[0]}';
+      final title = a.length > 1 && a[1] != null ? '${a[1]}' : 'WebUI';
+      hc.webViewTabManager.openUrl(url, title);
+      // 切到脚本中第一个 webview 类型的导航 tab
+      final idx = _navTabs.indexWhere(
+          (t) => t['page'] is Map && '${(t['page'] as Map)['type']}' == 'webview');
+      if (idx >= 0) hc.pendingMainTabIndex.value = idx;
+      return null;
+    });
+
+    // 反应式状态
+    e.registerHandler('state_get', (a) {
+      if (a.isEmpty) return null;
+      final key = '${a[0]}';
+      final def = a.length > 1 ? a[1] : null;
+      return _luaState.containsKey(key) ? _luaState[key] : def;
+    });
+    e.registerHandler('state_set', (a) {
+      if (a.isEmpty) return null;
+      _luaState['${a[0]}'] = a.length > 1 ? a[1] : null;
+      stateRevision.value++;
+      return null;
+    });
+
+    // 原生: 剪贴板 / 导航 / 外链 / 目录
+    e.registerHandler('clipboard_copy', (a) {
+      Clipboard.setData(ClipboardData(text: a.isNotEmpty ? '${a[0]}' : ''));
+      return null;
+    });
+    e.registerHandler('clipboard_paste', (a) async {
+      final d = await Clipboard.getData('text/plain');
+      return d?.text;
+    });
+    e.registerHandler('nav_go', (a) {
+      final idx = a.isNotEmpty ? (a[0] is int ? a[0] as int : int.tryParse('${a[0]}')) : null;
+      final hc = _home();
+      if (idx != null && hc != null) hc.pendingMainTabIndex.value = idx;
+      return null;
+    });
+    e.registerHandler('open_url', (a) {
+      if (a.isEmpty) return null;
+      final uri = Uri.tryParse('${a[0]}');
+      if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);
+      return null;
+    });
+    e.registerHandler('list_dir', (a) {
+      if (a.isEmpty) return const [];
+      final d = Directory('${a[0]}');
+      if (!d.existsSync()) return const [];
+      return [
+        for (final ent in d.listSync())
+          {
+            'name': ent.path.split('/').last,
+            'path': ent.path,
+            'isDir': ent is Directory,
+          }
+      ];
+    });
+    e.registerHandler('bin_path', (_) => RuntimeEnvir.binPath);
+    e.registerHandler('tmp_path', (_) => RuntimeEnvir.tmpPath);
+    e.registerHandler('backup_dir',
+        (_) => '/storage/emulated/0/Download/AstrBotBubble');
+    e.registerHandler('mkdirs', (a) {
+      if (a.isNotEmpty) {
+        final d = Directory('${a[0]}');
+        if (!d.existsSync()) d.createSync(recursive: true);
+      }
+      return null;
+    });
+    // 宿主层进程执行 (非容器; 如 busybox tar 备份)
+    e.registerHandler('host_run', (a) {
+      if (a.isEmpty) return null;
+      final program = '${a[0]}';
+      final args = a.length > 1 && a[1] is List
+          ? (a[1] as List).map((e) => '$e').toList()
+          : <String>[];
+      final cb = cbOf(a, 2);
+      Process.run(program, args).then((r) => cb?.call([
+            {
+              'code': r.exitCode,
+              'stdout': '${r.stdout}',
+              'stderr': '${r.stderr}',
+            }
+          ]));
+      return null;
+    });
+    // 原语: 在容器内跑(长)命令, 流式输出到终端 tab, 可选 key 跟踪运行态
+    e.registerHandler('spawn', (a) {
+      final hc = _home();
+      if (hc == null || a.isEmpty) return null;
+      final cmd = '${a[0]}';
+      final title = a.length > 1 && a[1] != null ? '${a[1]}' : '容器任务';
+      final key = a.length > 2 && a[2] != null ? '${a[2]}' : null;
+      final cb = cbOf(a, 3);
+      hc.spawnContainer(cmd, title: title, key: key, onExit: () {
+        stateRevision.value++;
+        cb?.call();
+      });
+      return null;
+    });
+    // 原语: 停止 key 对应的 spawn (关闭其终端 tab)
+    e.registerHandler('stop', (a) {
+      final hc = _home();
+      if (hc == null || a.isEmpty) return null;
+      hc.stopSpawn('${a[0]}');
+      stateRevision.value++;
+      return null;
+    });
+    // 原语: 在 [start,end] 范围内找一个可绑定的空闲端口 (跳过 exclude 列表)
+    // 通用能力, 无任何 AstrBot/NapCat 语义; cb(port|nil)
+    e.registerHandler('free_port', (a) {
+      final start = a.isNotEmpty && a[0] is int ? a[0] as int : 1024;
+      final end = a.length > 1 && a[1] is int ? a[1] as int : 65535;
+      final exclude = <int>{
+        if (a.length > 2 && a[2] is List)
+          for (final v in a[2] as List)
+            if (v is int) v else if (int.tryParse('$v') != null) int.parse('$v')
+      };
+      final cb = cbOf(a, 3);
+      () async {
+        for (var p = start; p <= end; p++) {
+          if (exclude.contains(p)) continue;
+          ServerSocket? s;
+          try {
+            s = await ServerSocket.bind(InternetAddress.loopbackIPv4, p);
+            await s.close();
+            cb?.call([p]);
+            return;
+          } catch (_) {
+          } finally {
+            await s?.close();
+          }
+        }
+        cb?.call([null]);
+      }();
+      return null;
+    });
+    // 原语: 解压 / 初始化 Ubuntu rootfs
+    e.registerHandler('install_rootfs', (a) {
+      final hc = _home();
+      if (hc == null) return null;
+      final cb = cbOf(a, 0);
+      hc.installRootfs(onExit: () {
+        stateRevision.value++;
+        cb?.call();
+      });
+      return null;
+    });
+
+    // 自定义对话框: 渲染 Lua 组件树, 依赖 stateRevision 重建
+    e.registerHandler('dialog', (a) {
+      final spec = a.isNotEmpty && a[0] is Map ? a[0] as Map : const {};
+      final buildRef = spec['build'];
+      final title = spec['title'];
+      if (buildRef is! LuaFunctionRef || Get.context == null) return null;
+      Get.dialog(
+        Obx(() {
+          stateRevision.value;
+          final desc = buildRef.call();
+          final content = LuaRenderer(onAction: () => stateRevision.value++)
+              .buildRoot(Get.context!, desc);
+          return AlertDialog(
+            title: title == null ? null : Text('$title'),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(child: content),
+            ),
+            actions: [
+              TextButton(onPressed: () => Get.back(), child: const Text('关闭')),
+            ],
+          );
+        }),
+      );
+      return null;
+    });
+    e.registerHandler('close_dialog', (_) {
+      if (Get.isDialogOpen ?? false) Get.back();
+      return null;
+    });
+    // 通用底部动作列表 (与终端更多菜单同款: 抽屉拖动手柄 + 列表)
+    e.registerHandler('sheet', (a) {
+      final spec = a.isNotEmpty && a[0] is Map ? a[0] as Map : const {};
+      final title = spec['title'];
+      final items = spec['items'] is List ? spec['items'] as List : const [];
+      if (Get.context == null) return null;
+      showModalBottomSheet<void>(
+        context: Get.context!,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: MediaQuery.withNoTextScaling(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (title != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('$title',
+                            style: Theme.of(ctx)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                  for (final it in items)
+                    if (it is Map)
+                      ListTile(
+                        enabled: it['enabled'] != false,
+                        leading: luaIconFor(it['icon']) == null
+                            ? null
+                            : Icon(luaIconFor(it['icon']),
+                                color: it['danger'] == true ? Colors.red : null),
+                        title: Text('${it['label'] ?? ''}',
+                            style: TextStyle(
+                                color:
+                                    it['danger'] == true ? Colors.red : null)),
+                        onTap: it['enabled'] == false
+                            ? null
+                            : () {
+                                Navigator.of(ctx).pop();
+                                final fn = it['onTap'];
+                                if (fn is LuaFunctionRef) fn.call();
+                                stateRevision.value++;
+                              },
+                      ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      return null;
+    });
+  }
+
+  /// 再次点击某导航项时触发其 onReTap (若脚本定义); 供内置页之外的 Lua 页使用。
+  void fireNavReTap(int index) {
+    if (index < 0 || index >= _navTabs.length) return;
+    final fn = _navTabs[index]['onReTap'];
+    if (fn is LuaFunctionRef) {
+      fn.call();
+      stateRevision.value++;
+    }
+  }
+
+  HomeController? _home() {
+    try {
+      return Get.find<HomeController>();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _toast(String msg) {
+    if (Get.context == null) {
+      debugPrint('[Lua toast] $msg');
+      return;
+    }
+    Get.rawSnackbar(message: msg, duration: const Duration(seconds: 2));
+  }
+
+  Future<void> _confirm(String msg, LuaFunctionRef? cb) async {
+    if (Get.context == null) {
+      cb?.call([false]);
+      cb?.dispose();
+      return;
+    }
+    final ok = await Get.dialog<bool>(
+      AlertDialog(
+        content: Text(msg),
+        actions: [
+          TextButton(onPressed: () => Get.back(result: false), child: const Text('取消')),
+          TextButton(onPressed: () => Get.back(result: true), child: const Text('确定')),
+        ],
+      ),
+    );
+    cb?.call([ok ?? false]);
+    cb?.dispose();
+  }
+
+  Future<void> _input(Map opts, LuaFunctionRef? cb) async {
+    if (Get.context == null) {
+      cb?.call([null]);
+      cb?.dispose();
+      return;
+    }
+    final controller = TextEditingController(text: '${opts['default'] ?? ''}');
+    final result = await Get.dialog<String?>(
+      AlertDialog(
+        title: Text('${opts['title'] ?? '输入'}'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(hintText: '${opts['hint'] ?? ''}'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Get.back(result: null), child: const Text('取消')),
+          TextButton(
+              onPressed: () => Get.back(result: controller.text),
+              child: const Text('确定')),
+        ],
+      ),
+    );
+    Future.delayed(const Duration(seconds: 1), controller.dispose);
+    cb?.call([result]);
+    cb?.dispose();
+  }
+}

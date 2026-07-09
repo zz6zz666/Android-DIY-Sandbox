@@ -1178,7 +1178,8 @@ class _LauncherPageState extends State<LauncherPage>
       portController: portController,
     );
     final portText = portController.text.trim();
-    portController.dispose();
+    // 延迟释放: 等对话框退出动画结束再 dispose, 避免使用已释放的 controller
+    Future.delayed(const Duration(seconds: 1), portController.dispose);
 
     if (result != true) return;
 
@@ -1214,8 +1215,9 @@ class _LauncherPageState extends State<LauncherPage>
     );
     final port = int.tryParse(portController.text.trim());
     final name = nameController.text.trim();
-    nameController.dispose();
-    portController.dispose();
+    // 延迟释放: 等对话框退出动画结束再 dispose, 避免使用已释放的 controller
+    Future.delayed(const Duration(seconds: 1), nameController.dispose);
+    Future.delayed(const Duration(seconds: 1), portController.dispose);
 
     if (result != true) return;
 

@@ -12,3 +12,5 @@ dependency_overrides:
     path: git_repos/settings
   flutter_pty:
     path: git_repos/flutter_pty
+  x5_webview:
+    path: git_repos/x5_webview

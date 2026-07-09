@@ -42,6 +42,10 @@ android {
         targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // 仅打包 arm64-v8a (GeckoView 内核较大, 现代设备主流架构)
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
     }
 
     lintOptions {
@@ -109,6 +113,8 @@ flutter {
 }
 dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    // 腾讯 X5 离线内核 (arm64-v8a), 内核随 App 打包, 免线上拉取
+    implementation 'com.github.HeartHappy.webX5Core:webx5core_arm64_v8a:1.0.2'
 
 // implementation fileTree(include: ['*.jar', '*aar'], dir: 'libs')
 }

@@ -166,7 +166,7 @@ class TerminalTabManager extends GetxController {
     }
   }
 
-  Future<void> addCommandTerminalTab({
+  Future<String> addCommandTerminalTab({
     required String title,
     required String command,
     String? onDoneMarker,
@@ -204,25 +204,36 @@ class TerminalTabManager extends GetxController {
       activeTabIndex.value = tabs.length - 1;
 
       var doneNotified = false;
+      void notifyDone() {
+        if (doneNotified) return;
+        doneNotified = true;
+        onCommandDone?.call();
+      }
+
       newPty.output
           .cast<List<int>>()
           .transform(const Utf8Decoder(allowMalformed: true))
           .listen((event) {
         newTab.appendLog(event);
         newTerminal.write(event);
-        if (!doneNotified &&
-            onDoneMarker != null &&
-            _containsDoneMarker(event, onDoneMarker)) {
-          doneNotified = true;
-          onCommandDone?.call();
+        if (onDoneMarker != null && _containsDoneMarker(event, onDoneMarker)) {
+          notifyDone();
         }
-      });
+      }, onDone: notifyDone, onError: (_) => notifyDone());
 
       newPty.writeString(command);
+      return tabId;
     } catch (e) {
       Log.e('添加命令终端标签页失败: $e', tag: 'TerminalTabManager');
       Get.snackbar('错误', '创建命令终端失败: $e');
+      return '';
     }
+  }
+
+  /// 按标签页 id 关闭 (会 kill 其 PTY)。
+  void closeTabById(String id) {
+    final idx = tabs.indexWhere((t) => t.id == id);
+    if (idx >= 0) closeTab(idx);
   }
 
   bool _containsDoneMarker(String event, String marker) {
@@ -286,6 +297,19 @@ class TerminalTabManager extends GetxController {
     } catch (e) {
       Log.e('关闭标签页失败: $e', tag: 'TerminalTabManager');
     }
+  }
+
+  /// 拖动排序: 移动标签并保持当前激活标签不变
+  void reorderTab(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= tabs.length) return;
+    if (newIndex < 0 || newIndex >= tabs.length) return;
+    if (oldIndex == newIndex) return;
+    final active = (activeTabIndex.value >= 0 && activeTabIndex.value < tabs.length)
+        ? tabs[activeTabIndex.value]
+        : null;
+    final moved = tabs.removeAt(oldIndex);
+    tabs.insert(newIndex, moved);
+    if (active != null) activeTabIndex.value = tabs.indexOf(active);
   }
 
   /// 获取当前激活的标签页

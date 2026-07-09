@@ -9,9 +9,11 @@ import 'dart:async';
 
 import 'generated/l10n.dart';
 import 'core/services/foreground_service.dart';
+import 'core/lua/script_manager.dart';
 import 'ui/routes/app_routes.dart';
 
 // Notice: behavior will submit Device
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,6 +44,14 @@ Future<void> main() async {
   final packageInfo = await PackageInfo.fromPlatform();
   RuntimeEnvir.initEnvirWithPackageName(packageInfo.packageName);
   await initSettingStore(RuntimeEnvir.configPath);
+
+  // 初始化 Lua 脚本运行时 (释放默认脚本 / 加载 prelude+用户脚本 / 注册页面与导航)
+  try {
+    await ScriptManager.instance.initialize();
+  } catch (e, st) {
+    debugPrint('[Lua] 初始化失败: $e\n$st');
+  }
+
   runApp(const AstrBot());
 }
 

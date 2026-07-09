@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title></title>
+    <link href="https://cdn.bootcss.com/mui/3.7.1/css/mui.min.css" rel="stylesheet">
+    <script src="https://cdn.bootcss.com/mui/3.7.1/js/mui.min.js"></script>
+
+
+</head>
+
+<style type="text/css">
+
+</style>
+<body>
+
+<header class="mui-bar mui-bar-nav">
+    <h1 class="mui-title">本地html测试</h1>
+</header>
+
+<div class="mui-content">
+    <div class="mui-input-row mui-search">
+        <input id="input" type="search" class="mui-input-clear" placeholder="请输入">
+    </div>
+
+    <button type="button"
+            class="mui-btn mui-btn-blue mui-btn-block"
+            onclick="postMsg()">
+        获取文字(js调用flutter)
+    </button>
+
+    <button type="button"
+            class="mui-btn mui-btn-blue mui-btn-block"
+            onclick="mui.openWindow('https://www.baidu.com')">
+        测试url拦截
+    </button>
+
+    <input type="file" accept="image/*">
+    <div id="headerText"></div>
+    <video style="width:100%; height: auto;" controls>
+        <source src="https://www.w3schools.com/html/mov_bbb.mp4" />
+    </video>
+
+</div>
+
+
+<script type="text/javascript">
+			mui.init();
+			
+			mui(".mui-input-row input")[0].addEventListener("keydown", function(e) {
+				if (13 == e.keyCode) { //点击了“搜索”  
+					document.activeElement.blur(); //隐藏软键盘
+					console.log(this.value);
+					alert(this.value);
+
+				}
+			}, false);
+
+
+			function postMsg(){
+                var msg=document.getElementById("input").value;
+                X5Web.postMessage(msg);
+			}
+            var ua=navigator.userAgent;
+            document.getElementById("headerText").innerText = "获取到的userAgent:"+ua;
+
+
+</script>
+
+</body>
+</html>

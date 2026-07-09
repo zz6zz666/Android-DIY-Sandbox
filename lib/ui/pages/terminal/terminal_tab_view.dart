@@ -8,7 +8,8 @@ import 'package:xterm/xterm.dart';
 
 import '../../controllers/terminal_controller.dart';
 import '../../controllers/terminal_tab_manager.dart';
-import '../../widgets/glass_panel.dart';
+import '../../../core/utils/file_utils.dart';
+import '../../widgets/tab_strip.dart';
 import 'terminal_theme.dart';
 
 class TerminalTabView extends StatefulWidget {
@@ -25,6 +26,22 @@ class _TerminalTabViewState extends State<TerminalTabView> {
 
   final HomeController homeController = Get.find<HomeController>();
   double _terminalFontSize = _defaultFontSize;
+  Worker? _menuWorker;
+
+  @override
+  void initState() {
+    super.initState();
+    // 再次点击终端导航图标 -> 弹出"更多"菜单
+    _menuWorker = ever<int>(homeController.terminalMenuSignal, (_) {
+      if (mounted) _showTerminalMenu(context, homeController.terminalTabManager);
+    });
+  }
+
+  @override
+  void dispose() {
+    _menuWorker?.dispose();
+    super.dispose();
+  }
 
   void _showTopSnack(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -109,6 +126,8 @@ class _TerminalTabViewState extends State<TerminalTabView> {
     tab.terminal.eraseDisplay();
     tab.terminal.eraseScrollbackOnly();
     tab.clearLog();
+    // 同时向容器发送 clear, 清理提示符与残留输出
+    tab.pty?.writeString('clear\n');
     if (tab.type == TerminalTabType.fixed) {
       homeController.clearStartupLog();
     }
@@ -215,14 +234,6 @@ class _TerminalTabViewState extends State<TerminalTabView> {
                           _clearActiveTerminal(context, manager);
                         },
                       ),
-                      ListTile(
-                        leading: const Icon(Icons.add),
-                        title: const Text('新建终端'),
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          manager.addSystemTerminalTab();
-                        },
-                      ),
                       const Divider(height: 20),
                       _buildFontSizeMenuItem(
                         onChanged: () => setSheetState(() {}),
@@ -314,105 +325,46 @@ class _TerminalTabViewState extends State<TerminalTabView> {
     return Obx(() {
       final manager = homeController.terminalTabManager;
       final tabs = manager.tabs;
-      final activeIndex = manager.activeTabIndex.value;
-
-      if (tabs.isEmpty) {
-        return const Center(child: Text('暂无终端'));
-      }
-
+      final activeIndex =
+          tabs.isEmpty ? 0 : manager.activeTabIndex.value.clamp(0, tabs.length - 1);
       return Column(
         children: [
-          _buildTabBar(tabs, activeIndex, manager),
+          TabStrip(
+            items: [
+              for (final t in tabs)
+                TabStripItem(
+                  id: t.id,
+                  title: t.title,
+                  icon: t.type == TerminalTabType.fixed
+                      ? Icons.lock_outline
+                      : Icons.terminal,
+                ),
+            ],
+            activeIndex: activeIndex,
+            opacity: homeController.topNavGlassOpacity.value,
+            blur: homeController.glassBlurAmount.value * 30,
+            onSelect: (i) => manager.switchToTab(i),
+            onClose: (i) => _showCloseConfirmDialog(i, manager),
+            onReorder: (o, n) => manager.reorderTab(o, n),
+            trailing: [
+              IconButton(
+                tooltip: '新建终端',
+                icon: const Icon(Icons.add, size: 22),
+                onPressed: () => homeController.newTerminalTab(),
+              ),
+            ],
+          ),
           Expanded(
-            child: IndexedStack(
-              index: activeIndex,
-              children: tabs.map(_buildTerminalContent).toList(),
-            ),
+            child: tabs.isEmpty
+                ? const Center(child: Text('暂无终端'))
+                : IndexedStack(
+                    index: activeIndex,
+                    children: tabs.map(_buildTerminalContent).toList(),
+                  ),
           ),
         ],
       );
     });
-  }
-
-  Widget _buildTabBar(
-    List<TerminalTab> tabs,
-    int activeIndex,
-    TerminalTabManager manager,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-      child: GlassPanel(
-        borderRadius: BorderRadius.circular(18),
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        opacity: homeController.topNavGlassOpacity.value,
-        blur: homeController.glassBlurAmount.value * 30,
-        child: MediaQuery.withNoTextScaling(
-          child: SizedBox(
-            height: 38,
-            child: Row(
-              children: [
-                Expanded(
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: tabs.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 6),
-                    itemBuilder: (context, index) {
-                      final tab = tabs[index];
-                      return _buildTabItem(
-                        tab: tab,
-                        isActive: index == activeIndex,
-                        onTap: () => manager.switchToTab(index),
-                        onClose: tab.type == TerminalTabType.system
-                            ? () => _showCloseConfirmDialog(index, manager)
-                            : null,
-                      );
-                    },
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.more_horiz, size: 22),
-                  onPressed: () => _showTerminalMenu(context, manager),
-                  tooltip: '终端菜单',
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabItem({
-    required TerminalTab tab,
-    required bool isActive,
-    required VoidCallback onTap,
-    VoidCallback? onClose,
-  }) {
-    final icon =
-        tab.type == TerminalTabType.fixed ? Icons.lock_outline : Icons.terminal;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          minWidth: 104,
-          maxWidth: 176,
-        ),
-        child: InputChip(
-          selected: isActive,
-          showCheckmark: false,
-          label: Text(
-            tab.title,
-            overflow: TextOverflow.ellipsis,
-          ),
-          avatar: Icon(icon, size: 16),
-          deleteIcon:
-              onClose == null ? null : const Icon(Icons.close, size: 16),
-          onDeleted: onClose,
-          onSelected: (_) => onTap(),
-        ),
-      ),
-    );
   }
 
   Widget _buildTerminalContent(TerminalTab tab) {

@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../../core/lua/script_manager.dart';
 import '../../controllers/terminal_controller.dart';
+import '../../lua/lua_view.dart';
 import '../../widgets/glass_panel.dart';
-import '../launcher/launcher_page.dart';
 import '../settings/settings_page.dart';
 import '../terminal/terminal_tab_view.dart';
 import '../webview/webview_page.dart';
+import '../webview/webview_tab_view.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -23,12 +25,23 @@ class _MainPageState extends State<MainPage> {
   int _currentIndex = 0;
   bool _showSettings = false;
 
+  /// 由 Lua 脚本定义的导航 tab; 为空时回退到单个主页。
+  List<Map<String, dynamic>> get _tabs {
+    final t = ScriptManager.instance.navTabs;
+    if (t.isEmpty) {
+      return [
+        {'title': '主页', 'icon': 'home', 'page': 'home'},
+      ];
+    }
+    return t;
+  }
+
   @override
   void initState() {
     super.initState();
     _mainTabWorker = ever<int?>(homeController.pendingMainTabIndex, (index) {
-      if (index == null || index < 0 || index > 2) return;
-      _openTab(index);
+      if (index == null || index < 0 || index >= _tabs.length) return;
+      _switchTab(index);
       homeController.clearPendingMainTabIndex(index);
     });
   }
@@ -39,24 +52,34 @@ class _MainPageState extends State<MainPage> {
     super.dispose();
   }
 
-  void _openTab(int index) {
+  void _switchTab(int index) {
     setState(() {
       _showSettings = false;
       _currentIndex = index;
     });
   }
 
-  void _openSettings() {
-    setState(() {
-      _showSettings = true;
-    });
+  /// 底部导航点击: 若点的是当前已选中的页, 视为"再次点击"事件。
+  void _onNavTap(int index) {
+    final tabs = _tabs;
+    final reTap = !_showSettings && index == _currentIndex;
+    _switchTab(index);
+    if (!reTap || index < 0 || index >= tabs.length) return;
+    final page = tabs[index]['page'];
+    final isTerminal =
+        page == 'terminal' || (page is Map && '${page['type']}' == 'terminal');
+    final isWebview = page is Map && '${page['type']}' == 'webview';
+    if (isTerminal) {
+      homeController.terminalMenuSignal.value++;
+    } else if (isWebview) {
+      homeController.webviewToolbarVisible.toggle();
+    } else {
+      ScriptManager.instance.fireNavReTap(index);
+    }
   }
 
-  void _closeSettings() {
-    setState(() {
-      _showSettings = false;
-    });
-  }
+  void _openSettings() => setState(() => _showSettings = true);
+  void _closeSettings() => setState(() => _showSettings = false);
 
   @override
   Widget build(BuildContext context) {
@@ -106,27 +129,74 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
+  /// 判断某 tab 是否为特殊的"主页"。
+  bool _isHome(Object? page) {
+    if (page is String) return page == 'home';
+    if (page is Map) return '${page['type']}' == 'home' || '${page['page']}' == 'home';
+    return false;
+  }
+
+  /// 根据 Lua 定义的 page 规格构造对应页面。
+  /// home / terminal 为特殊内置页; 其余(webview/游戏/自定义 Lua 页)为普通页。
+  Widget _pageFor(Map<String, dynamic> tab) {
+    final page = tab['page'];
+
+    // 特殊内置页: 主页 (携带固定齿轮顶栏)
+    if (_isHome(page)) {
+      final pageName =
+          page is Map ? '${page['page'] ?? 'home'}' : 'home';
+      return Column(
+        children: [
+          GlassAppBar(
+            title: '${tab['title'] ?? '主页'}',
+            opacity: homeController.topNavGlassOpacity.value,
+            blur: homeController.glassBlurAmount.value * 30,
+            actions: [
+              IconButton(
+                tooltip: '设置',
+                icon: const Icon(Icons.settings),
+                onPressed: _openSettings,
+              ),
+            ],
+          ),
+          Expanded(child: LuaPage(pageName: pageName)),
+        ],
+      );
+    }
+
+    // 特殊内置页: 终端
+    if (page == 'terminal' ||
+        (page is Map && '${page['type']}' == 'terminal')) {
+      return const TerminalTabView();
+    }
+
+    // 普通页: webview (通用多标签, 默认无标签)
+    if (page is Map && '${page['type']}' == 'webview') {
+      return const WebViewTabView(
+        bottomContentInset: _bottomNavReservedHeight,
+      );
+    }
+
+    // 普通页: 自定义 Lua 页面 (游戏 / 其它)
+    final name = page is Map ? '${page['page'] ?? page['type']}' : '$page';
+    return LuaPage(pageName: name);
+  }
+
   Widget _buildMainTabs() {
+    final tabs = _tabs;
+    final index = _currentIndex.clamp(0, tabs.length - 1);
     return SafeArea(
       bottom: false,
       child: IndexedStack(
-        index: _currentIndex,
-        children: [
-          LauncherPage(
-            onNavigate: _openTab,
-            onOpenSettings: _openSettings,
-          ),
-          const WebViewPage(
-            embedded: true,
-            bottomContentInset: _bottomNavReservedHeight,
-          ),
-          const TerminalTabView(),
-        ],
+        index: index,
+        children: [for (final t in tabs) _pageFor(t)],
       ),
     );
   }
 
   Widget _buildBottomNav(BuildContext context) {
+    final tabs = _tabs;
+    final index = _currentIndex.clamp(0, tabs.length - 1);
     return SafeArea(
       top: false,
       child: Padding(
@@ -138,30 +208,21 @@ class _MainPageState extends State<MainPage> {
           blur: homeController.glassBlurAmount.value * 30,
           child: MediaQuery.withNoTextScaling(
             child: NavigationBar(
-              selectedIndex: _currentIndex,
-              onDestinationSelected: _openTab,
+              selectedIndex: index,
+              onDestinationSelected: _onNavTap,
               backgroundColor: Colors.transparent,
               elevation: 0,
               height: 46,
               labelTextStyle: WidgetStateProperty.all(
                 const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
               ),
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.home_outlined, size: 22),
-                  selectedIcon: Icon(Icons.home, size: 22),
-                  label: '主页',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.language_outlined, size: 22),
-                  selectedIcon: Icon(Icons.language, size: 22),
-                  label: 'WebUI',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.terminal_outlined, size: 22),
-                  selectedIcon: Icon(Icons.terminal, size: 22),
-                  label: '终端',
-                ),
+              destinations: [
+                for (final t in tabs)
+                  NavigationDestination(
+                    icon: Icon(luaIconFor(t['icon']) ?? Icons.circle_outlined,
+                        size: 22),
+                    label: '${t['title'] ?? ''}',
+                  ),
               ],
             ),
           ),

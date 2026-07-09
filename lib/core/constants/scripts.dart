@@ -585,6 +585,10 @@ $installUbuntu
 $setupFakeSysdata
 $loginUbuntu
 ${getCopyFilesScript(currentVersion)}
+copy_config(){
+  mkdir -p "\$UBUNTU_PATH/root"
+  cp ~/cmd_config.json "\$UBUNTU_PATH/root/cmd_config.json" 2>/dev/null || true
+}
 clear_lines
 start_astrbot(){
   login_ubuntu "export TMPDIR='${RuntimeEnvir.tmpPath}'; export ASTRBOT_DASHBOARD_PORT='${ServicePorts.dashboardPort}'; if [ ! -x /root/.local/bin/uv ] || [ ! -d /root/AstrBot ] || [ ! -f /root/AstrBot/pyproject.toml ] || [ ! -f /root/AstrBot/main.py ] || [ ! -d /root/AstrBot/.venv ]; then echo __ASTRBOT_MANUAL_ENV_REQUIRED__; echo 'AstrBot 环境未安装完整，请到主页环境管理安装。'; exit 1; fi; cd /root/AstrBot; echo 'AstrBot 启动中'; /root/.local/bin/uv run --no-sync main.py"

@@ -431,17 +431,17 @@ class _WebViewPageState extends State<WebViewPage> {
             ].contains(type.toLowerCase()));
 
         if (isImageOnly) {
-          result = await FilePicker.platform.pickFiles(
+          result = await FilePicker.pickFiles(
             type: FileType.image,
             allowMultiple: allowMultiple,
           );
         } else if (isVideoOnly) {
-          result = await FilePicker.platform.pickFiles(
+          result = await FilePicker.pickFiles(
             type: FileType.video,
             allowMultiple: allowMultiple,
           );
         } else if (isAudioOnly) {
-          result = await FilePicker.platform.pickFiles(
+          result = await FilePicker.pickFiles(
             type: FileType.audio,
             allowMultiple: allowMultiple,
           );
@@ -460,13 +460,13 @@ class _WebViewPageState extends State<WebViewPage> {
           }
 
           if (allowedExtensions.isNotEmpty) {
-            result = await FilePicker.platform.pickFiles(
+            result = await FilePicker.pickFiles(
               type: FileType.custom,
               allowedExtensions: allowedExtensions,
               allowMultiple: allowMultiple,
             );
           } else {
-            result = await FilePicker.platform.pickFiles(
+            result = await FilePicker.pickFiles(
               type: FileType.any,
               allowMultiple: allowMultiple,
             );
@@ -474,7 +474,7 @@ class _WebViewPageState extends State<WebViewPage> {
         }
       } else {
         // 没有指定类型，允许选择任何文件
-        result = await FilePicker.platform.pickFiles(
+        result = await FilePicker.pickFiles(
           type: FileType.any,
           allowMultiple: allowMultiple,
         );
@@ -1011,57 +1011,17 @@ class _WebViewPageState extends State<WebViewPage> {
   }
 
   Future<void> _showAddEmbeddedWebUiDialog() async {
-    final titleController = TextEditingController();
-    final urlController = TextEditingController();
-    final result = await showDialog<bool>(
+    final result = await showDialog<_AddWebUiResult>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('添加自定义 WebUI'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleController,
-              decoration: const InputDecoration(
-                labelText: '标题',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: urlController,
-              keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                labelText: 'URL',
-                helperText: '自动添加前缀 http://127.0.0.1:\n若需使用 https，请输入完整 URL',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('添加'),
-          ),
-        ],
-      ),
+      builder: (context) => const _AddWebUiDialog(),
     );
 
-    if (result != true) {
-      titleController.dispose();
-      urlController.dispose();
+    if (result == null) {
       return;
     }
 
-    final title = titleController.text.trim();
-    final urlInput = urlController.text.trim();
-    titleController.dispose();
-    urlController.dispose();
+    final title = result.title.trim();
+    final urlInput = result.url.trim();
 
     if (title.isEmpty || urlInput.isEmpty) {
       Get.snackbar(
@@ -1346,4 +1306,75 @@ class _WebUiTarget {
     this.customWebViewIndex,
   });
 }
+
+/// 添加自定义 WebUI 对话框的返回值
+class _AddWebUiResult {
+  final String title;
+  final String url;
+  const _AddWebUiResult(this.title, this.url);
+}
+
+/// 添加自定义 WebUI 的对话框。
+/// 自行管理 TextEditingController 生命周期(在 State.dispose 中释放),
+/// 避免在对话框退出动画期间使用已释放的 controller。
+class _AddWebUiDialog extends StatefulWidget {
+  const _AddWebUiDialog();
+
+  @override
+  State<_AddWebUiDialog> createState() => _AddWebUiDialogState();
+}
+
+class _AddWebUiDialogState extends State<_AddWebUiDialog> {
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _urlController = TextEditingController();
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('添加自定义 WebUI'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _titleController,
+            decoration: const InputDecoration(
+              labelText: '标题',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _urlController,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'URL',
+              helperText: '自动添加前缀 http://127.0.0.1:\n若需使用 https，请输入完整 URL',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(
+            _AddWebUiResult(_titleController.text, _urlController.text),
+          ),
+          child: const Text('添加'),
+        ),
+      ],
+    );
+  }
+}
+
 

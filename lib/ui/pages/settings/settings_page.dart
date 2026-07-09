@@ -8,12 +8,14 @@ import 'package:global_repository/global_repository.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../controllers/terminal_controller.dart';
+import '../../routes/app_routes.dart';
 import '../../../core/constants/scripts.dart' as scripts;
 import '../../../core/services/password_manager.dart';
 import '../../../core/config/app_config.dart';
+import '../../../core/lua/script_manager.dart';
 
 class SettingsPage extends StatefulWidget {
   final WebViewController astrBotController;
@@ -61,7 +63,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _pickHomeBackground() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.image,
         allowMultiple: false,
       );
@@ -1021,6 +1023,254 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 精简设置页: 仅保留必要项。旧项完整保留在 _buildLegacySettings 中, 待迁移到 Lua。
+    return ListView(
+      children: [
+        const Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Text(
+            '设置',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+        ),
+        _luaHotUpdateTile(context),
+        _updateTile(),
+        ..._appearanceItems(context),
+        _batteryTile(),
+        _fileSystemTile(),
+        _clearCacheTile(context),
+        _privacyTile(context),
+        const Divider(),
+        _exitTile(),
+      ],
+    );
+  }
+
+  Widget _luaHotUpdateTile(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.system_update_alt),
+      title: const Text('Lua 热更新'),
+      subtitle: const Text('从磁盘重新加载脚本 (在线分发方案待接入)'),
+      onTap: () async {
+        await ScriptManager.instance.reload();
+        Get.snackbar('Lua', '脚本已重新加载',
+            snackPosition: SnackPosition.BOTTOM,
+            duration: const Duration(seconds: 1));
+      },
+    );
+  }
+
+  Widget _updateTile() {
+    return ListTile(
+      leading: const Icon(Icons.info_outline),
+      title: const Text('软件版本'),
+      subtitle: Text(
+        _appVersion.isEmpty ? '加载中...' : '$_appVersion（点击检查更新）',
+      ),
+      onTap: () => _checkForUpdates(),
+    );
+  }
+
+  // 外观调节 (留在设置页)
+  List<Widget> _appearanceItems(BuildContext context) {
+    return [
+      const Padding(
+        padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Text('外观',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
+      ),
+      Obx(() {
+        final backgroundPath = Get.find<HomeController>().homeBackgroundPath.value;
+        return ListTile(
+          leading: const Icon(Icons.image_outlined),
+          title: const Text('主页背景图片'),
+          subtitle: Text(backgroundPath.isEmpty ? '使用默认背景' : backgroundPath),
+          trailing: backgroundPath.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: '清除背景',
+                  onPressed: _clearHomeBackground,
+                  icon: const Icon(Icons.close),
+                ),
+          onTap: _pickHomeBackground,
+        );
+      }),
+      Obx(() {
+        final c = Get.find<HomeController>();
+        return _buildOpacitySlider(
+          title: '卡片透明度',
+          subtitle: '调整主页卡片和底部菜单的毛玻璃底色',
+          icon: Icons.layers_outlined,
+          value: c.cardGlassOpacity.value,
+          onChanged: c.setCardGlassOpacity,
+        );
+      }),
+      Obx(() {
+        final c = Get.find<HomeController>();
+        return _buildOpacitySlider(
+          title: '毛玻璃度',
+          subtitle: '调整整体毛玻璃模糊强度',
+          icon: Icons.blur_on,
+          value: c.glassBlurAmount.value,
+          onChanged: c.setGlassBlurAmount,
+        );
+      }),
+      Obx(() {
+        final c = Get.find<HomeController>();
+        return _buildOpacitySlider(
+          title: '顶部导航透明度',
+          subtitle: '调整顶部标题栏毛玻璃底色',
+          icon: Icons.view_day_outlined,
+          value: c.topNavGlassOpacity.value,
+          onChanged: c.setTopNavGlassOpacity,
+        );
+      }),
+      Obx(() {
+        final c = Get.find<HomeController>();
+        return _buildOpacitySlider(
+          title: '设置背景遮罩',
+          subtitle: '调整设置页背景遮罩浓度',
+          icon: Icons.filter_b_and_w_outlined,
+          value: c.statusOverlayOpacity.value,
+          onChanged: c.setStatusOverlayOpacity,
+        );
+      }),
+      Obx(() {
+        final c = Get.find<HomeController>();
+        return _buildOpacitySlider(
+          title: '终端黑色遮罩',
+          subtitle: '调整终端背景黑色遮罩浓度',
+          icon: Icons.terminal,
+          value: c.terminalOverlayOpacity.value,
+          onChanged: c.setTerminalOverlayOpacity,
+        );
+      }),
+    ];
+  }
+
+  Widget _batteryTile() {
+    return ListTile(
+      leading: const Icon(Icons.battery_saver),
+      title: const Text('电池优化豁免'),
+      subtitle: Text(_isBatteryOptimizationIgnored ? '已授权' : '未授权（点击授权）'),
+      trailing: _isBatteryOptimizationIgnored
+          ? const Icon(Icons.check_circle, color: Colors.green)
+          : const Icon(Icons.warning, color: Colors.orange),
+      onTap: () => _requestBatteryOptimization(),
+    );
+  }
+
+  Widget _fileSystemTile() {
+    return ListTile(
+      leading: const Icon(Icons.folder),
+      title: const Text('文件系统'),
+      subtitle: const Text(
+        '内置 Ubuntu 文件系统已挂载至 \'文件\'\n可添加至 MT 文件管理器侧栏以快捷访问',
+      ),
+      onTap: () => _openFileManager(),
+    );
+  }
+
+  Widget _clearCacheTile(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.delete_outline),
+      title: const Text('清空本应用 WebView 缓存'),
+      subtitle: const Text('只清理泡泡版 WebView 缓存和本应用保存的密码'),
+      onTap: () async {
+        try {
+          await widget.astrBotController.clearCache();
+          await widget.napCatController.clearCache();
+          await PasswordManager.clearAllPasswords();
+          Get.snackbar('成功', 'WebView 缓存和密码已清理',
+              snackPosition: SnackPosition.BOTTOM);
+        } catch (e) {
+          Get.snackbar('清理失败', e.toString(),
+              snackPosition: SnackPosition.BOTTOM,
+              backgroundColor: Colors.red,
+              colorText: Colors.white);
+        }
+      },
+    );
+  }
+
+  Widget _privacyTile(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.privacy_tip_outlined),
+      title: const Text('隐私政策'),
+      subtitle: const Text('查看应用隐私政策'),
+      onTap: () async {
+        try {
+          final privacyContent =
+              await rootBundle.loadString('assets/privacy_policy.md');
+          Get.dialog(
+            Dialog(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: SizedBox(
+                  width: double.maxFinite,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: SingleChildScrollView(
+                          child: MarkdownBody(data: privacyContent),
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () => Get.back(),
+                          child: const Text('关闭'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        } catch (e) {
+          Get.snackbar('加载失败', '无法加载隐私政策: $e',
+              snackPosition: SnackPosition.BOTTOM,
+              backgroundColor: Colors.red,
+              colorText: Colors.white);
+        }
+      },
+    );
+  }
+
+  Widget _exitTile() {
+    return ListTile(
+      leading: const Icon(Icons.exit_to_app, color: Colors.red),
+      title: const Text('退出应用', style: TextStyle(color: Colors.red)),
+      subtitle: const Text('退出 AstrBot 应用'),
+      onTap: () async {
+        final confirm = await Get.dialog<bool>(
+          AlertDialog(
+            title: const Text('确认退出'),
+            content: const Text('确定要退出应用吗？'),
+            actions: [
+              TextButton(
+                  onPressed: () => Get.back(result: false),
+                  child: const Text('取消')),
+              TextButton(
+                  onPressed: () => Get.back(result: true),
+                  child: const Text('退出', style: TextStyle(color: Colors.red))),
+            ],
+          ),
+        );
+        if (confirm == true) {
+          Get.snackbar('退出应用', '应用即将退出',
+              snackPosition: SnackPosition.BOTTOM,
+              duration: const Duration(seconds: 2));
+          Future.delayed(const Duration(seconds: 2), () => exit(0));
+        }
+      },
+    );
+  }
+
+  // ignore: unused_element
+  Widget _buildLegacySettings(BuildContext context) {
     return ListView(
       children: [
         const Padding(
@@ -1523,6 +1773,18 @@ class _SettingsPageState extends State<SettingsPage> {
           title: const Text('自定义 Git Clone 命令'),
           subtitle: const Text('自定义 AstrBot 的获取方式'),
           onTap: () => _showCustomGitCloneDialog(),
+        ),
+        ListTile(
+          leading: const Icon(Icons.science_outlined),
+          title: const Text('实验: X5 内核渲染测试'),
+          subtitle: const Text('用腾讯 X5 独立内核渲染面板, 对比老安卓效果'),
+          onTap: () => Get.toNamed(AppRoutes.x5Test),
+        ),
+        ListTile(
+          leading: const Icon(Icons.extension_outlined),
+          title: const Text('实验: Lua 主页预览'),
+          subtitle: const Text('由 Lua 脚本声明式渲染的主页 (Phase 2)'),
+          onTap: () => Get.toNamed(AppRoutes.luaPreview),
         ),
         ListTile(
           leading: const Icon(Icons.folder),
