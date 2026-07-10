@@ -43,6 +43,31 @@ function host.close_dialog() return __host_call("close_dialog") end
 -- host.sheet({ title="", items={ {label=,icon=,onTap=fn,enabled=true,danger=false}, ... } })
 function host.sheet(spec) return __host_call("sheet", spec) end
 
+-- ==================== 网络 (通用, 供任意 Lua 玩具/AI 交互使用) ====================
+-- host.http{ url=, method="GET", headers={}, body=, stream=false, timeout=,
+--   on_response=function(status, headers) end,
+--   on_chunk=function(text) end,          -- 仅 stream=true 时逐块回调
+--   on_done=function(res) end,            -- res={status,ok,headers,body}
+--   on_error=function(err) end }
+-- 返回句柄 id; host.http_cancel(id) 取消在途请求。
+function host.http(spec) return __host_call("http", spec or {}) end
+function host.http_cancel(id) return __host_call("http_cancel", id) end
+
+-- host.websocket{ url=, headers={},
+--   on_open=function() end,
+--   on_message=function(data, is_binary) end,  -- 文本为 string; 二进制为字节数组
+--   on_close=function(code, reason) end,
+--   on_error=function(err) end }
+-- 返回连接对象: ws:send(data) / ws:close(code, reason)
+function host.websocket(spec)
+  local id = __host_call("ws_open", spec or {})
+  if not id then return nil end
+  local ws = { id = id }
+  function ws:send(data) return __host_call("ws_send", self.id, data) end
+  function ws:close(code, reason) return __host_call("ws_close", self.id, code, reason) end
+  return ws
+end
+
 -- ==================== 反应式状态 ====================
 -- local s = state("key", default); s.get(); s.set(v)  -- set 会触发本页重建
 function state(key, default)

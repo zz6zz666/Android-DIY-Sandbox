@@ -83,11 +83,53 @@ ctx.ports.dashboard / onebot / napcat       -- int
 | `host.exec(cmd, cb)` | 在容器执行命令并**取回输出**; `cb({code=int, output=string})` |
 | `host.container(cmd, cb)` | 执行命令(不取输出); `cb()` 完成回调 |
 | `host.run(program, args, cb)` | **宿主层**进程执行 (非容器, 如 busybox tar); `cb({code,stdout,stderr})` |
-| `host.astrbot.start()/stop()/toggle()` | AstrBot 启停 |
-| `host.run_env_step(step, title, reinstall, cb)` | 运行环境安装步骤 (base/uv/napcat/astrbot) |
 | `host.bin_path()` | 原生二进制目录 (bash/busybox/proot 等) |
 | `host.backup_dir()` | 备份目录 (/storage/emulated/0/Download/AstrBotBubble) |
 | `host.mkdirs(p)` | 递归创建目录 |
+
+### 网络（通用, 供任意 Lua 玩具 / AI 交互）
+| API | 说明 |
+|-----|------|
+| `host.http(spec)` | 发起 HTTP/HTTPS 请求, 返回句柄 id; 支持流式 (SSE)。见下方字段 |
+| `host.http_cancel(id)` | 取消一个在途请求 |
+| `host.websocket(spec)` | 建立 WebSocket, 返回连接对象 `ws` |
+| `ws:send(data)` | 发送文本 (string) 或二进制 (字节数组) |
+| `ws:close(code, reason)` | 关闭连接 |
+
+`host.http(spec)` 的 `spec` 字段:
+
+```lua
+local id = host.http{
+  url = "https://api.example.com/v1/chat/completions",
+  method = "POST",                    -- 默认 GET
+  headers = { ["Content-Type"] = "application/json",
+              Authorization = "Bearer sk-..." },
+  body = json.encode({ ... }),        -- 字符串
+  stream = true,                      -- true 时逐块回调 on_chunk (SSE)
+  timeout = 60,                       -- 秒; stream=true 时不限接收超时
+  on_response = function(status, headers) end,  -- 收到响应头
+  on_chunk    = function(text) end,             -- 仅 stream=true; 每块已解码文本
+  on_done     = function(res) end,              -- res = {status, ok, headers, body}
+  on_error    = function(err) end,
+}
+```
+
+> SSE 的 `data:` 行拆分请在 Lua 侧对 `on_chunk` 文本自行解析 (host.http 只投递原始文本块, 保持通用)。
+
+`host.websocket(spec)`:
+
+```lua
+local ws = host.websocket{
+  url = "wss://example.com/socket",
+  headers = {},                       -- 可选
+  on_open    = function() end,
+  on_message = function(data, is_binary) end,   -- 文本=string; 二进制=字节数组
+  on_close   = function(code, reason) end,
+  on_error   = function(err) end,
+}
+ws:send('{"type":"ping"}')
+ws:close()
+```
 
 ### NapCat 账号操作
 | API | 说明 |

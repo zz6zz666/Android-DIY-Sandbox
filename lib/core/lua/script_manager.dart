@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle, Clipboard, ClipboardData;
 import 'package:get/get.dart';
@@ -30,6 +32,11 @@ class ScriptManager {
   /// 反应式状态: Lua 页面通过 state(key,default) 读写; 变化时递增触发所有 LuaPage 重建。
   final RxInt stateRevision = 0.obs;
   final Map<String, dynamic> _luaState = {};
+
+  // 通用网络原语状态: 自增句柄 + 在途 HTTP 取消令牌 + 存活的 WebSocket 连接。
+  int _netSeq = 0;
+  final Map<int, CancelToken> _httpCancels = {};
+  final Map<int, WebSocket> _sockets = {};
 
   bool get initialized => _initialized;
   List<Map<String, dynamic>> get navTabs => _navTabs;
@@ -468,9 +475,203 @@ class ScriptManager {
       );
       return null;
     });
+
+    // 通用 HTTP/HTTPS 原语: 供任意 Lua 玩具(含 AI 交互)使用, 无任何业务语义。
+    // 入参为配置表 { url, method, headers, body, stream, timeout,
+    //   on_response=fn(status,headers), on_chunk=fn(text), on_done=fn(res), on_error=fn(err) }
+    // 返回自增句柄, 可用于 host.http_cancel(id) 取消。
+    e.registerHandler('http', (a) {
+      if (a.isEmpty || a[0] is! Map) return null;
+      final spec = a[0] as Map;
+      final id = ++_netSeq;
+      final token = CancelToken();
+      _httpCancels[id] = token;
+      _httpRequest(id, spec, token);
+      return id;
+    });
+    e.registerHandler('http_cancel', (a) {
+      final id = a.isNotEmpty ? (a[0] as num?)?.toInt() : null;
+      if (id != null) _httpCancels.remove(id)?.cancel('cancelled');
+      return null;
+    });
+
+    // 通用 WebSocket 原语: { url, headers, on_open=fn, on_message=fn(data,binary),
+    //   on_close=fn(code,reason), on_error=fn(err) }; 返回句柄用于 ws_send / ws_close。
+    e.registerHandler('ws_open', (a) {
+      if (a.isEmpty || a[0] is! Map) return null;
+      final id = ++_netSeq;
+      _wsOpen(id, a[0] as Map);
+      return id;
+    });
+    e.registerHandler('ws_send', (a) {
+      final id = a.isNotEmpty ? (a[0] as num?)?.toInt() : null;
+      final data = a.length > 1 ? a[1] : null;
+      final ws = id == null ? null : _sockets[id];
+      if (ws == null || data == null) return false;
+      try {
+        if (data is List) {
+          ws.add(data.map((v) => (v as num).toInt() & 0xff).toList());
+        } else {
+          ws.add('$data');
+        }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    });
+    e.registerHandler('ws_close', (a) {
+      final id = a.isNotEmpty ? (a[0] as num?)?.toInt() : null;
+      final code = a.length > 1 ? (a[1] as num?)?.toInt() : null;
+      final reason = a.length > 2 && a[2] != null ? '${a[2]}' : null;
+      final ws = id == null ? null : _sockets.remove(id);
+      try {
+        ws?.close(code, reason);
+      } catch (_) {}
+      return null;
+    });
   }
 
-  /// 再次点击某导航项时触发其 onReTap (若脚本定义); 供内置页之外的 Lua 页使用。
+  /// 执行一次 HTTP 请求; 流式时逐块经 on_chunk 回灌, 完成时 on_done 携完整结果。
+  Future<void> _httpRequest(int id, Map spec, CancelToken token) async {
+    LuaFunctionRef? fn(Object? key) =>
+        spec[key] is LuaFunctionRef ? spec[key] as LuaFunctionRef : null;
+    final onResponse = fn('on_response');
+    final onChunk = fn('on_chunk');
+    final onDone = fn('on_done');
+    final onError = fn('on_error');
+
+    var released = false;
+    void cleanup() {
+      if (released) return;
+      released = true;
+      _httpCancels.remove(id);
+      onResponse?.dispose();
+      onChunk?.dispose();
+      onDone?.dispose();
+      onError?.dispose();
+    }
+
+    final url = '${spec['url'] ?? ''}';
+    final method = '${spec['method'] ?? 'GET'}'.toUpperCase();
+    final stream = spec['stream'] == true;
+    final timeout = (spec['timeout'] as num?)?.toInt();
+    final headers = <String, dynamic>{};
+    if (spec['headers'] is Map) {
+      (spec['headers'] as Map).forEach((k, v) => headers['$k'] = '$v');
+    }
+
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: Duration(seconds: timeout ?? 30),
+        receiveTimeout: stream ? null : Duration(seconds: timeout ?? 60),
+      ));
+      final resp = await dio.request(
+        url,
+        data: spec['body'],
+        cancelToken: token,
+        options: Options(
+          method: method,
+          headers: headers,
+          responseType: stream ? ResponseType.stream : ResponseType.plain,
+          validateStatus: (_) => true,
+        ),
+      );
+      final status = resp.statusCode ?? 0;
+      final respHeaders = <String, String>{};
+      resp.headers.forEach((k, v) => respHeaders[k] = v.join(', '));
+      final ok = status >= 200 && status < 300;
+      onResponse?.call([status, respHeaders]);
+
+      if (stream) {
+        final sb = StringBuffer();
+        final rb = resp.data as ResponseBody;
+        rb.stream.cast<List<int>>().transform(utf8.decoder).listen(
+          (text) {
+            sb.write(text);
+            onChunk?.call([text]);
+          },
+          onDone: () {
+            onDone?.call([
+              {'status': status, 'ok': ok, 'headers': respHeaders, 'body': sb.toString()}
+            ]);
+            cleanup();
+          },
+          onError: (Object err) {
+            onError?.call(['$err']);
+            cleanup();
+          },
+          cancelOnError: true,
+        );
+      } else {
+        final body = resp.data == null ? '' : '${resp.data}';
+        onDone?.call([
+          {'status': status, 'ok': ok, 'headers': respHeaders, 'body': body}
+        ]);
+        cleanup();
+      }
+    } catch (e) {
+      if (!released) {
+        final cancelled = e is DioException && CancelToken.isCancel(e);
+        onError?.call([cancelled ? 'cancelled' : '$e']);
+      }
+      cleanup();
+    }
+  }
+
+  /// 建立 WebSocket 连接; 存活期间可 ws_send / 收到 on_message, 关闭时 on_close。
+  Future<void> _wsOpen(int id, Map spec) async {
+    LuaFunctionRef? fn(Object? key) =>
+        spec[key] is LuaFunctionRef ? spec[key] as LuaFunctionRef : null;
+    final onOpen = fn('on_open');
+    final onMessage = fn('on_message');
+    final onClose = fn('on_close');
+    final onError = fn('on_error');
+
+    var released = false;
+    void cleanup() {
+      if (released) return;
+      released = true;
+      _sockets.remove(id);
+      onOpen?.dispose();
+      onMessage?.dispose();
+      onClose?.dispose();
+      onError?.dispose();
+    }
+
+    final url = '${spec['url'] ?? ''}';
+    final headers = <String, dynamic>{};
+    if (spec['headers'] is Map) {
+      (spec['headers'] as Map).forEach((k, v) => headers['$k'] = '$v');
+    }
+
+    try {
+      final ws = await WebSocket.connect(url, headers: headers);
+      _sockets[id] = ws;
+      onOpen?.call();
+      ws.listen(
+        (Object? data) {
+          if (data is String) {
+            onMessage?.call([data, false]);
+          } else if (data is List<int>) {
+            onMessage?.call([data, true]);
+          }
+        },
+        onDone: () {
+          onClose?.call([ws.closeCode, ws.closeReason]);
+          cleanup();
+        },
+        onError: (Object err) {
+          onError?.call(['$err']);
+          cleanup();
+        },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      onError?.call(['$e']);
+      cleanup();
+    }
+  }
+
   void fireNavReTap(int index) {
     if (index < 0 || index >= _navTabs.length) return;
     final fn = _navTabs[index]['onReTap'];
