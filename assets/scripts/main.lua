@@ -1,6 +1,9 @@
 -- AstrBot 泡泡版 · 默认脚本 (位于 {configPath}/scripts/main.lua, 可直接编辑, 设置页"Lua 热更新"重载)
 -- API 详见 docs/lua_api.md
 
+-- 独立 agent 模块 (opencode 引擎: 安装/启动/WebUI 托管), 界面在本文件编排
+local agent = require("agent")
+
 -- 端口管理: 纯 Lua, 基于通用设置存储 host.get/set (无 Dart 特定端口逻辑)
 local ports = {
   key = { dashboard = "astrbot_dashboard_port", onebot = "astrbot_onebot_ws_port", napcat = "napcat_webui_port" },
@@ -40,6 +43,8 @@ local function env_installed(step)
     return host.exists(ub .. "/root/launcher.sh") and host.exists(ub .. "/root/napcat")
   elseif step == "astrbot" then
     return host.exists(ub .. "/root/AstrBot/main.py") and host.exists(ub .. "/root/AstrBot/.venv")
+  elseif step == "opencode" then
+    return agent.installed()
   end
   return false
 end
@@ -49,6 +54,7 @@ local ENV_STEPS = {
   { id = "uv",      title = "uv",       sub = "Python 依赖管理工具" },
   { id = "napcat",  title = "NapCat",   sub = "安装或修复 NapCatQQ" },
   { id = "astrbot", title = "AstrBot",  sub = "克隆 AstrBot 并同步依赖" },
+  { id = "opencode", title = "opencode", sub = "AI 编程助手引擎 (v" .. agent.version .. ")" },
 }
 
 -- ============================================================
@@ -395,6 +401,7 @@ local STEP_RUN = {
   uv = step_uv,
   napcat = step_napcat,
   astrbot = step_astrbot,
+  opencode = function(reinstall) agent.install(reinstall) end,
 }
 
 -- ============================================================
@@ -1229,3 +1236,8 @@ app.page("home", function(ctx)
     manage_section(),
   }
 end)
+
+-- 主页顶栏自定义按钮 (设置按钮左侧): DIY = 启动 opencode 引擎并打开 WebUI
+app.actions({
+  { icon = "smart_toy", tooltip = "opencode", onTap = function() agent.launch() end },
+})

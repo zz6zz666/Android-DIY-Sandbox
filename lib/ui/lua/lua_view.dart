@@ -55,6 +55,9 @@ const Map<String, IconData> _kIcons = {
   'logout': Icons.logout,
   'qr': Icons.qr_code,
   'warning': Icons.warning_amber,
+  'smart_toy': Icons.smart_toy_outlined,
+  'rocket': Icons.rocket_launch,
+  'chat': Icons.chat_bubble_outline,
 };
 
 IconData? luaIconFor(Object? name) => name == null ? null : _kIcons[name.toString()];

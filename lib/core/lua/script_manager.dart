@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle, Clipboard, ClipboardData;
+import 'package:flutter/services.dart' show rootBundle, AssetManifest, Clipboard, ClipboardData;
 import 'package:get/get.dart';
 import 'package:global_repository/global_repository.dart';
 import 'package:settings/settings.dart';
@@ -20,12 +20,14 @@ class ScriptManager {
   ScriptManager._();
   static final ScriptManager instance = ScriptManager._();
 
-  /// 内置默认脚本版本; 每次修改 assets/scripts/main.lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '13';
+  /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
+  static const String _defaultScriptsVersion = '17';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
   List<Map<String, dynamic>> _navTabs = [];
+  /// 由 Lua 注册的主页顶栏自定义按钮 (渲染在设置按钮左侧, 可多个)。
+  List<Map<String, dynamic>> _homeActions = [];
   bool _initialized = false;
   String? lastError;
 
@@ -40,6 +42,7 @@ class ScriptManager {
 
   bool get initialized => _initialized;
   List<Map<String, dynamic>> get navTabs => _navTabs;
+  List<Map<String, dynamic>> get homeActions => _homeActions;
   List<String> get pageNames => _pages.keys.toList();
 
   String get scriptsDir => '${RuntimeEnvir.configPath}/scripts';
@@ -63,6 +66,7 @@ class ScriptManager {
   Future<void> reload() async {
     _pages.clear();
     _navTabs = [];
+    _homeActions = [];
     _initialized = false;
     // 重新开一个干净的 lua_State, 避免残留全局
     _engine.close();
@@ -72,22 +76,39 @@ class ScriptManager {
   Future<void> _releaseDefaultScripts() async {
     final dir = Directory(scriptsDir);
     if (!dir.existsSync()) dir.createSync(recursive: true);
-    final main = File('${dir.path}/main.lua');
     final marker = File('${dir.path}/.default_version');
     final installedVer =
         marker.existsSync() ? marker.readAsStringSync().trim() : '';
-    // 内置默认脚本版本变化时重新释放 (施工期覆盖; 后续可改为仅覆盖未修改文件)
-    if (!main.existsSync() || installedVer != _defaultScriptsVersion) {
-      final content = await rootBundle.loadString('assets/scripts/main.lua');
-      main.writeAsStringSync(content);
+    // 内置默认脚本版本变化时重新释放全部 .lua 文件 (施工期覆盖; 后续可改为仅覆盖未修改文件)
+    if (installedVer != _defaultScriptsVersion) {
+      try {
+        final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+        var copied = 0;
+        for (final key in manifest.listAssets()) {
+          if (!key.startsWith('assets/scripts/') || !key.endsWith('.lua')) continue;
+          final name = key.substring('assets/scripts/'.length);
+          final out = File('${dir.path}/$name');
+          final data = await rootBundle.load(key);
+          out.writeAsBytesSync(data.buffer
+              .asUint8List(data.offsetInBytes, data.lengthInBytes));
+          copied++;
+        }
+        debugPrint('[ScriptManager] 已释放 $copied 个默认脚本 (v$_defaultScriptsVersion)');
+      } catch (e) {
+        debugPrint('[ScriptManager] 释放脚本失败: $e');
+      }
       marker.writeAsStringSync(_defaultScriptsVersion);
-      debugPrint('[ScriptManager] 已释放默认脚本 (v$_defaultScriptsVersion) 到 ${main.path}');
     }
   }
 
   void _loadUserScripts() {
     final main = File('$scriptsDir/main.lua');
     if (main.existsSync()) {
+      // 让 require 能从脚本目录加载模块 (agent.lua 等)
+      _engine.doString(
+        "package.path = '$scriptsDir/?.lua;$scriptsDir/?/init.lua;' .. package.path",
+        chunkName: 'package_path',
+      );
       _engine.doString(main.readAsStringSync(), chunkName: 'main.lua');
     }
   }
@@ -135,6 +156,19 @@ class ScriptManager {
           for (final t in list)
             if (t is Map) Map<String, dynamic>.from(t),
         ];
+      }
+      return null;
+    });
+    // 注册主页顶栏自定义按钮列表 (渲染在设置按钮左侧)。
+    // 每项: { icon=, tooltip=, onTap=fn }
+    e.registerHandler('register_actions', (a) {
+      final list = a.isNotEmpty ? a[0] : null;
+      if (list is List) {
+        _homeActions = [
+          for (final t in list)
+            if (t is Map) Map<String, dynamic>.from(t),
+        ];
+        stateRevision.value++;
       }
       return null;
     });
@@ -385,6 +419,14 @@ class ScriptManager {
         stateRevision.value++;
         cb?.call();
       });
+      return null;
+    });
+
+    // 原语: 延时回调 (Lua 无 sleep; 用于轮询/重试等). delay(ms, cb)
+    e.registerHandler('delay', (a) {
+      final ms = a.isNotEmpty ? (a[0] as num?)?.toInt() ?? 0 : 0;
+      final cb = cbOf(a, 1);
+      Future.delayed(Duration(milliseconds: ms), () => cb?.call());
       return null;
     });
 

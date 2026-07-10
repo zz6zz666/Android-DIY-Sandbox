@@ -32,6 +32,8 @@ function host.spawn(cmd, title, key, cb) return __host_call("spawn", cmd, title,
 function host.stop(key) return __host_call("stop", key) end
 function host.free_port(start, stop, exclude, cb) return __host_call("free_port", start, stop, exclude or {}, cb) end
 function host.install_rootfs(cb) return __host_call("install_rootfs", cb) end
+-- 延时回调 (Lua 无 sleep): host.delay(ms, function() end)
+function host.delay(ms, cb) return __host_call("delay", ms, cb) end
 host.clipboard = {
   copy  = function(s) return __host_call("clipboard_copy", tostring(s)) end,
   paste = function() return __host_call("clipboard_paste") end,
@@ -134,6 +136,9 @@ function terminal()   return { type = "terminal" } end
 -- ==================== 应用注册 ====================
 app = {}
 function app.page(name, fn) __host_call("register_page", name, fn) end
+-- 主页顶栏自定义按钮 (渲染在设置按钮左侧, 可多个):
+-- app.actions({ { icon="rocket_launch", tooltip="启动", onTap=function() end }, ... })
+function app.actions(list) __host_call("register_actions", list or {}) end
 nav = {}
 function nav.tabs(list) __host_call("nav_tabs", list) end
 

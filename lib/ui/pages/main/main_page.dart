@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../../core/lua/lua_engine.dart';
 import '../../../core/lua/script_manager.dart';
 import '../../controllers/terminal_controller.dart';
 import '../../lua/lua_view.dart';
@@ -80,6 +81,22 @@ class _MainPageState extends State<MainPage> {
   void _openSettings() => setState(() => _showSettings = true);
   void _closeSettings() => setState(() => _showSettings = false);
 
+  /// 由 Lua 注册的主页顶栏自定义按钮 (设置按钮左侧, 可多个)。
+  List<Widget> _buildLuaActions() {
+    return [
+      for (final act in ScriptManager.instance.homeActions)
+        IconButton(
+          tooltip: act['tooltip'] == null ? null : '${act['tooltip']}',
+          icon: Icon(luaIconFor(act['icon']) ?? Icons.extension),
+          onPressed: () {
+            final fn = act['onTap'];
+            if (fn is LuaFunctionRef) fn.call();
+            ScriptManager.instance.stateRevision.value++;
+          },
+        ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return Obx(
@@ -148,6 +165,7 @@ class _MainPageState extends State<MainPage> {
             opacity: homeController.topNavGlassOpacity.value,
             blur: homeController.glassBlurAmount.value * 30,
             actions: [
+              ..._buildLuaActions(),
               IconButton(
                 tooltip: '设置',
                 icon: const Icon(Icons.settings),
