@@ -1231,6 +1231,18 @@ end
 app.page("home", function(ctx)
   return {
     quick_start_card(ctx),
+    -- love 画布: 不套卡片, 直接和普通 Flutter 组件在一个 row 里并排排版
+    row({
+      expanded(love{ height = 160 }),
+      spacer(8),
+      expanded(column({
+        text("← 左边是 love2d 画布", { weight = "bold" }),
+        spacer(6),
+        text("右边是普通 Flutter 文本, 和它同排。"),
+        spacer(6),
+        button("普通按钮", function() host.toast("我是同排的普通按钮") end),
+      })),
+    }, { crossAxis = "center" }),
     napcat_card(ctx),
     env_card(),
     manage_section(),

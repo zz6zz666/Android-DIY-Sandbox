@@ -130,6 +130,13 @@ function expansion(title, children, o) o=o or {}; o.title=title; o.children=chil
 --        onSelect=fn(i), onClose=fn(i), onReorder=fn(from,to), trailing={...}, empty="" })
 function tabs(o) return comp("tabs", o or {}) end
 
+-- LÖVE (love2d) 动态渲染画布: 一块可与其它 Lua 组件同层排版的"贴纸画布"。
+-- love{ height=200, game="/path/to/game.love 或目录", autopause=true }
+-- game 省略时使用内置示例(弹跳球)。
+-- autopause: 切到其它导航页时自动挂起(停渲染、留内存、不丢状态), 默认 true;
+--            设为 false 则一直渲染。(注: SDL 无法进程内销毁重启, 故只有挂起/恢复)
+function love(o) return comp("love", o or {}) end
+
 -- ==================== 导航目标构造 ====================
 function webview(url) return { type = "webview", url = url } end
 function terminal()   return { type = "terminal" } end

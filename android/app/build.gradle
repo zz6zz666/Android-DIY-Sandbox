@@ -106,6 +106,12 @@ android {
             jniLibs.srcDirs = ['src/main/jniLibs']
         }
     }
+
+    packagingOptions {
+        jniLibs {
+            pickFirsts += ['**/libc++_shared.so']
+        }
+    }
 }
 
 flutter {

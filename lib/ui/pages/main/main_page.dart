@@ -9,6 +9,7 @@ import '../../widgets/glass_panel.dart';
 import '../settings/settings_page.dart';
 import '../terminal/terminal_tab_view.dart';
 import '../webview/webview_tab_view.dart';
+import '../love/love_game_view.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -210,7 +211,10 @@ class _MainPageState extends State<MainPage> {
       bottom: false,
       child: IndexedStack(
         index: index,
-        children: [for (final t in tabs) _pageFor(t)],
+        children: [
+          for (int i = 0; i < tabs.length; i++)
+            LovePageActive(active: i == index, child: _pageFor(tabs[i])),
+        ],
       ),
     );
   }

@@ -7,6 +7,7 @@ import '../../core/lua/lua_engine.dart';
 import '../../core/lua/script_manager.dart';
 import '../widgets/glass_panel.dart';
 import '../widgets/tab_strip.dart';
+import '../pages/love/love_game_view.dart';
 
 /// 字符串图标名 -> IconData (运行时无法反射查图标, 故用静态映射表)。
 const Map<String, IconData> _kIcons = {
@@ -406,6 +407,17 @@ class LuaRenderer {
         );
       case 'divider':
         return const Divider();
+
+      case 'love':
+        final gp = node['game'];
+        return SizedBox(
+          width: LuaStyle._d(node['width']),
+          height: LuaStyle._d(node['height']) ?? 200,
+          child: LoveGameView(
+            gamePath: gp == null ? null : '$gp',
+            autoSuspend: node['autopause'] != false,
+          ),
+        );
 
       // 交互
       case 'button':

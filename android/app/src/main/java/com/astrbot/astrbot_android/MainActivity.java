@@ -3,18 +3,39 @@ package com.astrbot.astrbot_android;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.res.AssetManager;
+import android.graphics.Rect;
+import android.media.AudioManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.util.DisplayMetrics;
+import android.util.Log;
+import android.view.DisplayCutout;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.widget.Toast;
 
+import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.app.ActivityCompat;
 import androidx.fragment.app.FragmentActivity;
 import androidx.fragment.app.FragmentManager;
+
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 
 import io.flutter.embedding.android.FlutterFragment;
 import io.flutter.embedding.engine.FlutterEngine;
@@ -54,6 +75,11 @@ public class MainActivity extends FragmentActivity {
             }
         });
         GeneratedPluginRegistrant.registerWith(flutterEngine);
+        // LÖVE (love2d) texture bridge: renders the game into a Flutter texture.
+        MethodChannel loveChannel = new MethodChannel(
+                flutterEngine.getDartExecutor().getBinaryMessenger(), LoveTextureController.CHANNEL);
+        loveChannel.setMethodCallHandler(
+                new LoveTextureController(this, flutterEngine.getRenderer()));
         FlutterEngineCache.getInstance().put("my_engine_id", flutterEngine);
         if (flutterFragment == null) {
             flutterFragment = FlutterFragment.withCachedEngine("my_engine_id").build();
@@ -171,6 +197,135 @@ public class MainActivity extends FragmentActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+    }
+
+    // ==================================================================
+    // LÖVE (love2d) native bridge methods.
+    // love's native code (love::android::*) calls these via JNI on the
+    // current Activity (SDL.getContext()), which is this MainActivity when a
+    // game runs embedded in a Flutter texture. Mirrors love's expected @Keep API.
+    // ==================================================================
+
+    private Vibrator loveVibrator;
+    private boolean loveImmersive;
+
+    @Keep
+    public void vibrate(double seconds) {
+        if (loveVibrator == null) {
+            loveVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        }
+        if (loveVibrator != null) {
+            long duration = (long) (seconds * 1000.);
+            if (Build.VERSION.SDK_INT >= 26) {
+                loveVibrator.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE));
+            } else {
+                loveVibrator.vibrate(duration);
+            }
+        }
+    }
+
+    @Keep
+    public boolean hasBackgroundMusic() {
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        return am != null && am.isMusicActive();
+    }
+
+    @Keep
+    public float getDPIScale() {
+        return getResources().getDisplayMetrics().density;
+    }
+
+    @Keep
+    public Rect getSafeArea() {
+        // Embedded in a bounded region: the host manages insets, so no extra safe area.
+        if (Build.VERSION.SDK_INT >= 28 && getWindow() != null
+                && getWindow().getDecorView().getRootWindowInsets() != null) {
+            DisplayCutout cutout = getWindow().getDecorView().getRootWindowInsets().getDisplayCutout();
+            if (cutout != null && loveImmersive) {
+                Rect rect = new Rect();
+                rect.set(cutout.getSafeInsetLeft(), cutout.getSafeInsetTop(),
+                        cutout.getSafeInsetRight(), cutout.getSafeInsetBottom());
+                return rect;
+            }
+        }
+        return null;
+    }
+
+    @Keep
+    public String getCRequirePath() {
+        ApplicationInfo appInfo = getApplicationInfo();
+        if ((appInfo.flags & ApplicationInfo.FLAG_EXTRACT_NATIVE_LIBS) != 0) {
+            return appInfo.nativeLibraryDir + "/?.so";
+        }
+        String abi = Build.SUPPORTED_ABIS[0];
+        return appInfo.sourceDir + "!/lib/" + abi + "/?.so";
+    }
+
+    @Keep
+    public void setImmersiveMode(boolean enable) {
+        // Do not alter the host window when embedded; just remember the flag.
+        loveImmersive = enable;
+    }
+
+    @Keep
+    public boolean getImmersiveMode() {
+        return loveImmersive;
+    }
+
+    @Keep
+    public boolean hasRecordAudioPermission() {
+        return ActivityCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Keep
+    public void requestRecordAudioPermission() {
+        if (hasRecordAudioPermission()) {
+            return;
+        }
+        runOnUiThread(() -> ActivityCompat.requestPermissions(this,
+                new String[]{android.Manifest.permission.RECORD_AUDIO}, 3));
+    }
+
+    @Keep
+    public void showRecordingAudioPermissionMissingDialog() {
+        Log.w("MainActivity", "LÖVE requested audio recording without permission");
+    }
+
+    @Keep
+    public String[] buildFileTree() {
+        HashMap<String, Boolean> map = buildFileTree(getAssets(), "", new HashMap<>());
+        ArrayList<String> result = new ArrayList<>();
+        for (Map.Entry<String, Boolean> data : map.entrySet()) {
+            result.add((data.getValue() ? "d" : "f") + data.getKey());
+        }
+        return result.toArray(new String[0]);
+    }
+
+    private HashMap<String, Boolean> buildFileTree(AssetManager assetManager, String dir, HashMap<String, Boolean> map) {
+        String strippedDir = dir.endsWith("/") ? dir.substring(0, dir.length() - 1) : dir;
+        try {
+            InputStream test = assetManager.open(strippedDir);
+            test.close();
+            map.put(strippedDir, false);
+        } catch (FileNotFoundException e) {
+            String[] list = null;
+            try {
+                list = assetManager.list(strippedDir);
+            } catch (IOException ignored) {
+            }
+            map.put(dir, true);
+            if (!strippedDir.equals(dir)) {
+                map.put(strippedDir, true);
+            }
+            if (list != null) {
+                for (String path : list) {
+                    buildFileTree(assetManager, dir + path + "/", map);
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        return map;
     }
 
 }
