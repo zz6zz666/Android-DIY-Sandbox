@@ -128,6 +128,9 @@ class _AstrBotState extends State<AstrBot> with WidgetsBindingObserver {
       title: 'AstrBot Android',
       theme: ThemeData(
         colorSchemeSeed: Colors.primaries[3],
+        dialogTheme: const DialogThemeData(
+          actionsPadding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+        ),
       ),
       // locale: const Locale('zh', 'CN'),
       // locale: const Locale('en'),

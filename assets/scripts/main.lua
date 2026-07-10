@@ -52,9 +52,9 @@ end
 local ENV_STEPS = {
   { id = "base",    title = "基础命令", sub = "sudo / git / curl" },
   { id = "uv",      title = "uv",       sub = "Python 依赖管理工具" },
-  { id = "napcat",  title = "NapCat",   sub = "安装或修复 NapCatQQ" },
   { id = "astrbot", title = "AstrBot",  sub = "克隆 AstrBot 并同步依赖" },
-  { id = "opencode", title = "opencode", sub = "AI 编程助手引擎 (v" .. agent.version .. ")" },
+  { id = "napcat",  title = "NapCat",   sub = "安装或修复 NapCatQQ" },
+  { id = "opencode", title = "OpenCode", sub = "DIY AI coding agent" },
 }
 
 -- ============================================================
@@ -1239,5 +1239,10 @@ end)
 
 -- 主页顶栏自定义按钮 (设置按钮左侧): DIY = 启动 opencode 引擎并打开 WebUI
 app.actions({
-  { icon = "smart_toy", tooltip = "opencode", onTap = function() agent.launch() end },
+  { icon = "construction", tooltip = "DIY 脚本定制", onTap = function()
+    agent.launch("/app-lua-runtime", "opencode-lua")
+  end },
+  { icon = "smart_toy", tooltip = "opencode AI 助手", onTap = function()
+    agent.launch()
+  end },
 })

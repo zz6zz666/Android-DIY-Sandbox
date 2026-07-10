@@ -1,19 +1,11 @@
 allprojects {
     repositories {
-        // X5 离线内核本地仓库 (优先, 免 JitPack 下载 50MB)
-        maven {
-            url "${rootProject.projectDir}/offline_x5_repo"
-            content { includeGroup 'com.github.HeartHappy.webX5Core' }
-        }
         // 国内镜像 (added by opencode)
         maven { url 'https://maven.aliyun.com/repository/public' }
         maven { url 'https://maven.aliyun.com/repository/google' }
         maven { url 'https://maven.aliyun.com/repository/central' }
         maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
-        // JitPack (X5 离线内核 webX5Core)
         maven { url 'https://jitpack.io' }
-        // google()
-        // jcenter()
         maven { url 'https://storage.flutter-io.cn/repository/google' }
         maven { url 'https://storage.flutter-io.cn/repository/jcenter' }
         maven { url 'https://storage.flutter-io.cn/repository/public' }

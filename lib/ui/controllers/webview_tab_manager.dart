@@ -1,18 +1,13 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
+
+import 'app_web_controller.dart';
 
 /// 一个 WebUI 标签页 (通用, 无任何 AstrBot/NapCat 语义)。
 class WebViewTab {
   final String id;
   String title;
   String url;
-  final WebViewController controller;
+  final AppWebController controller;
 
   WebViewTab({
     required this.id,
@@ -45,7 +40,7 @@ class WebViewTabManager {
       id: 'webui_${DateTime.now().millisecondsSinceEpoch}',
       title: title.isEmpty ? 'WebUI' : title,
       url: norm,
-      controller: _createController(norm),
+      controller: AppWeb.create(norm),
     );
     tabs.add(tab);
     activeIndex.value = tabs.length - 1;
@@ -55,7 +50,7 @@ class WebViewTabManager {
     if (index < 0 || index >= tabs.length) return;
     final tab = tabs.removeAt(index);
     tab.controller.clearCache();
-    tab.controller.loadRequest(Uri.parse('about:blank'));
+    tab.controller.dispose();
     if (tabs.isEmpty) {
       activeIndex.value = 0;
     } else if (activeIndex.value >= tabs.length) {
@@ -89,7 +84,7 @@ class WebViewTabManager {
       id: 'webui_${DateTime.now().millisecondsSinceEpoch}',
       title: '',
       url: '',
-      controller: _createController('about:blank'),
+      controller: AppWeb.create('about:blank'),
     );
     tabs.add(tab);
     activeIndex.value = tabs.length - 1;
@@ -119,7 +114,7 @@ class WebViewTabManager {
       final t = tabs[i];
       t.url = url;
       t.title = displayTitle(url);
-      t.controller.loadRequest(Uri.parse(url));
+      t.controller.loadUrl(url);
       tabs.refresh();
     }
     editingIndex.value = null;
@@ -135,7 +130,7 @@ class WebViewTabManager {
 
   void _removeAt(int index) {
     final tab = tabs.removeAt(index);
-    tab.controller.loadRequest(Uri.parse('about:blank'));
+    tab.controller.dispose();
     if (tabs.isEmpty) {
       activeIndex.value = 0;
     } else if (activeIndex.value >= tabs.length) {
@@ -158,133 +153,5 @@ class WebViewTabManager {
   /// 无名 URL 标签的显示标题 (去掉协议前缀)。
   static String displayTitle(String url) {
     return url.replaceFirst(RegExp(r'^https?://'), '');
-  }
-
-  // ==================== 控制器工厂 ====================
-
-  static bool _isLocalUrl(String url) {
-    try {
-      final host = Uri.parse(url).host.toLowerCase();
-      if (host == 'localhost' || host == '127.0.0.1' || host == '0.0.0.0') {
-        return true;
-      }
-      if (host.startsWith('192.168.') || host.startsWith('10.')) return true;
-      if (host.startsWith('172.')) {
-        final parts = host.split('.');
-        final o = parts.length >= 2 ? int.tryParse(parts[1]) : null;
-        return o != null && o >= 16 && o <= 31;
-      }
-      return false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<void> _launchInBrowser(String url) async {
-    try {
-      final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-    } catch (e) {
-      debugPrint('打开外部链接失败: $e');
-    }
-  }
-
-  static WebViewController _createController(String url) {
-    final interceptExternal = _isLocalUrl(url);
-    final controller = WebViewController();
-    controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-    controller.setBackgroundColor(Colors.white);
-    controller.setNavigationDelegate(
-      NavigationDelegate(
-        onNavigationRequest: (request) {
-          if (interceptExternal && !_isLocalUrl(request.url)) {
-            _launchInBrowser(request.url);
-            return NavigationDecision.prevent;
-          }
-          return NavigationDecision.navigate;
-        },
-        onPageFinished: (_) {
-          controller.runJavaScript(_disableZoomJs);
-        },
-        onWebResourceError: (error) {
-          debugPrint('WebUI 加载错误: ${error.description}');
-        },
-      ),
-    );
-
-    if (controller.platform is AndroidWebViewController) {
-      AndroidWebViewController.enableDebugging(kDebugMode);
-      final android = controller.platform as AndroidWebViewController;
-      android.setMediaPlaybackRequiresUserGesture(false);
-      android.setMixedContentMode(MixedContentMode.compatibilityMode);
-      android.setAllowFileAccess(true);
-      android.setAllowContentAccess(true);
-      android.setOnShowFileSelector(_handleFileSelection);
-    }
-
-    controller.loadRequest(Uri.parse(url));
-    return controller;
-  }
-
-  static const String _disableZoomJs = '''
-    (function() {
-      if (window.__wvZoomPatched) return;
-      window.__wvZoomPatched = true;
-      var meta = document.querySelector('meta[name="viewport"]');
-      var c = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-      if (meta) { meta.content = c; }
-      else {
-        meta = document.createElement('meta');
-        meta.name = 'viewport'; meta.content = c;
-        document.head.appendChild(meta);
-      }
-      var lastTouchEnd = 0;
-      document.addEventListener('touchend', function(e) {
-        var now = Date.now();
-        if (now - lastTouchEnd <= 300) { e.preventDefault(); }
-        lastTouchEnd = now;
-      }, false);
-      document.addEventListener('gesturestart', function(e) { e.preventDefault(); }, false);
-    })();
-  ''';
-
-  static Future<List<String>> _handleFileSelection(
-      FileSelectorParams params) async {
-    try {
-      final allowMultiple = params.mode == FileSelectorMode.openMultiple;
-      FilePickerResult? result;
-      final accept = params.acceptTypes.where((e) => e.isNotEmpty).toList();
-      final imageOnly = accept.isNotEmpty &&
-          accept.every((t) => t.startsWith('image/'));
-      final videoOnly = accept.isNotEmpty &&
-          accept.every((t) => t.startsWith('video/'));
-      final audioOnly = accept.isNotEmpty &&
-          accept.every((t) => t.startsWith('audio/'));
-      if (imageOnly) {
-        result = await FilePicker.pickFiles(
-            type: FileType.image, allowMultiple: allowMultiple);
-      } else if (videoOnly) {
-        result = await FilePicker.pickFiles(
-            type: FileType.video, allowMultiple: allowMultiple);
-      } else if (audioOnly) {
-        result = await FilePicker.pickFiles(
-            type: FileType.audio, allowMultiple: allowMultiple);
-      } else {
-        result = await FilePicker.pickFiles(
-            type: FileType.any, allowMultiple: allowMultiple);
-      }
-      if (result == null) return [];
-      return result.files
-          .where((f) => f.path != null)
-          .map((f) => f.path!.startsWith('file://')
-              ? f.path!
-              : 'file://${f.path!.replaceAll('\\', '/')}')
-          .toList();
-    } catch (e) {
-      debugPrint('文件选择失败: $e');
-      return [];
-    }
   }
 }

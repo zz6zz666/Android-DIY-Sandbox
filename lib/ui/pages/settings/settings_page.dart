@@ -10,11 +10,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../controllers/terminal_controller.dart';
-import '../../routes/app_routes.dart';
 import '../../../core/constants/scripts.dart' as scripts;
 import '../../../core/services/password_manager.dart';
 import '../../../core/config/app_config.dart';
-import '../../../core/lua/script_manager.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -617,9 +615,11 @@ class _SettingsPageState extends State<SettingsPage> {
     return ListTile(
       leading: const Icon(Icons.system_update_alt),
       title: const Text('Lua 热更新'),
-      subtitle: const Text('应用脚本修改 (需手动操作以保留回退选项)'),
-      onTap: () async {
-        await ScriptManager.instance.reloadWithGuard();
+      subtitle: const Text('联网检查上游脚本更新 (待接入)'),
+      onTap: () {
+        Get.snackbar('Lua', '暂无更新, 当前已是最新版本',
+            snackPosition: SnackPosition.BOTTOM,
+            duration: const Duration(seconds: 1));
       },
     );
   }

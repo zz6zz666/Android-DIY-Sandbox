@@ -104,6 +104,7 @@ class GlassAppBar extends StatelessWidget {
   final String title;
   final List<Widget> actions;
   final Widget? leading;
+  final Widget? titleSuffix;
   final double opacity;
   final double blur;
 
@@ -112,6 +113,7 @@ class GlassAppBar extends StatelessWidget {
     required this.title,
     this.actions = const [],
     this.leading,
+    this.titleSuffix,
     this.opacity = 0.62,
     this.blur = 18,
   });
@@ -135,12 +137,18 @@ class GlassAppBar extends StatelessWidget {
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                      overflow: TextOverflow.ellipsis,
+                    child: Row(
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (titleSuffix != null) const SizedBox(width: 4),
+                        if (titleSuffix != null) titleSuffix!,
+                      ],
                     ),
                   ),
                 ),

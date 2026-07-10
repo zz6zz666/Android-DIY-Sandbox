@@ -22,7 +22,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '18';
+  static const String _defaultScriptsVersion = '22';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -134,7 +134,7 @@ class ScriptManager {
     if (ctx == null || !ctx.mounted) return;
     await Get.dialog<Object?>(
       _CountdownDialog(
-        title: '脚本已应用',
+        title: '脚本已刷新',
         onKeep: () {
           Directory(_snapshotDir).deleteSync(recursive: true);
         },

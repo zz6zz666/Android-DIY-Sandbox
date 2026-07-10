@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../controllers/terminal_controller.dart';
 import '../../controllers/webview_tab_manager.dart';
@@ -14,9 +13,7 @@ import '../../widgets/tab_strip.dart';
 /// - + 直接在标签栏新增空标签并进入编辑; 未填写则不创建
 /// - 再次点击 WebUI 导航图标 -> 底部弹出二级浏览器工具栏 (< > 居中 + 等)
 class WebViewTabView extends StatefulWidget {
-  final double bottomContentInset;
-
-  const WebViewTabView({super.key, this.bottomContentInset = 0});
+  const WebViewTabView({super.key});
 
   @override
   State<WebViewTabView> createState() => _WebViewTabViewState();
@@ -96,20 +93,15 @@ class _WebViewTabViewState extends State<WebViewTabView> {
               ],
             ),
           Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(
-                bottom: showToolbar ? 0 : widget.bottomContentInset,
-              ),
-              child: hasTabs
-                  ? IndexedStack(
-                      index: activeIndex,
-                      children: [
-                        for (final t in tabs)
-                          WebViewWidget(controller: t.controller),
-                      ],
-                    )
-                  : const Center(child: Text('暂无 WebUI')),
-            ),
+            child: hasTabs
+                ? IndexedStack(
+                    index: activeIndex,
+                    children: [
+                      for (final t in tabs)
+                        t.controller.buildView(),
+                    ],
+                  )
+                : const Center(child: Text('暂无 WebUI')),
           ),
           if (showToolbar) _buildBrowserToolbar(context, activeIndex),
         ],
@@ -165,7 +157,7 @@ class _WebViewTabViewState extends State<WebViewTabView> {
     final hasTabs = manager.tabs.isNotEmpty;
     final controller = hasTabs ? manager.tabs[activeIndex].controller : null;
     return Padding(
-      padding: EdgeInsets.fromLTRB(12, 4, 12, widget.bottomContentInset + 6),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
       child: Material(
         color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(16),

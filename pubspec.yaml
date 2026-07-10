@@ -24,8 +24,6 @@ dependencies:
   path: ^1.9.1
   webview_flutter: ^4.10.0
   webview_flutter_android: ^4.10.0
-  # 实验: 腾讯 X5(TBS) 独立内核, 用于对比老安卓渲染效果
-  x5_webview: ^0.4.0
   permission_handler: ^11.3.1
   http: ^1.2.2
   url_launcher: ^6.3.1

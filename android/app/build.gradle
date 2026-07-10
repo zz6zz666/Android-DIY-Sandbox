@@ -38,7 +38,7 @@ android {
 
     defaultConfig {
         applicationId 'com.astrbot.astrbot_bubble'
-        minSdk = 24
+        minSdk = 26
         targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -106,6 +106,11 @@ android {
             jniLibs.srcDirs = ['src/main/jniLibs']
         }
     }
+
+    // 内置 WebView 内核 APK 必须保持不压缩, 否则 AssetManager.openFd 无法读取
+    androidResources {
+        noCompress += ['apk']
+    }
 }
 
 flutter {
@@ -113,8 +118,6 @@ flutter {
 }
 dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    // 腾讯 X5 离线内核 (arm64-v8a), 内核随 App 打包, 免线上拉取
-    implementation 'com.github.HeartHappy.webX5Core:webx5core_arm64_v8a:1.0.2'
-
-// implementation fileTree(include: ['*.jar', '*aar'], dir: 'libs')
+    // 内置现代 Chromium WebView 内核 (免安装升级, 加载 assets 中的 WebView APK)
+    implementation 'io.github.jonanorman.android.webviewup:core:0.1.0'
 }

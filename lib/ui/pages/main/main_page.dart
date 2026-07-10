@@ -18,7 +18,6 @@ class MainPage extends StatefulWidget {
 }
 
 class _MainPageState extends State<MainPage> {
-  static const double _bottomNavReservedHeight = 60;
 
   final HomeController homeController = Get.put(HomeController());
   Worker? _mainTabWorker;
@@ -104,7 +103,6 @@ class _MainPageState extends State<MainPage> {
         imagePath: homeController.homeBackgroundPath.value,
         child: Scaffold(
           backgroundColor: Colors.transparent,
-          extendBody: true,
           body: _showSettings ? _buildSettingsPage() : _buildMainTabs(),
           bottomNavigationBar: _showSettings ? null : _buildBottomNav(context),
         ),
@@ -164,6 +162,17 @@ class _MainPageState extends State<MainPage> {
             title: '${tab['title'] ?? '主页'}',
             opacity: homeController.topNavGlassOpacity.value,
             blur: homeController.glassBlurAmount.value * 30,
+            titleSuffix: _isHome(page)
+                ? IconButton(
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 18,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    tooltip: '应用脚本更改',
+                    icon: const Icon(Icons.refresh),
+                    onPressed: () => ScriptManager.instance.reloadWithGuard(),
+                  )
+                : null,
             actions: [
               ..._buildLuaActions(),
               IconButton(
@@ -186,9 +195,7 @@ class _MainPageState extends State<MainPage> {
 
     // 普通页: webview (通用多标签, 默认无标签)
     if (page is Map && '${page['type']}' == 'webview') {
-      return const WebViewTabView(
-        bottomContentInset: _bottomNavReservedHeight,
-      );
+      return const WebViewTabView();
     }
 
     // 普通页: 自定义 Lua 页面 (游戏 / 其它)
