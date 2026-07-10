@@ -617,12 +617,9 @@ class _SettingsPageState extends State<SettingsPage> {
     return ListTile(
       leading: const Icon(Icons.system_update_alt),
       title: const Text('Lua 热更新'),
-      subtitle: const Text('从磁盘重新加载脚本 (在线分发方案待接入)'),
+      subtitle: const Text('应用脚本修改 (需手动操作以保留回退选项)'),
       onTap: () async {
-        await ScriptManager.instance.reload();
-        Get.snackbar('Lua', '脚本已重新加载',
-            snackPosition: SnackPosition.BOTTOM,
-            duration: const Duration(seconds: 1));
+        await ScriptManager.instance.reloadWithGuard();
       },
     );
   }

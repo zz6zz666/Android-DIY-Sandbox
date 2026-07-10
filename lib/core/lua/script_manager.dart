@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -21,7 +22,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '17';
+  static const String _defaultScriptsVersion = '18';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -71,6 +72,79 @@ class ScriptManager {
     // 重新开一个干净的 lua_State, 避免残留全局
     _engine.close();
     await initialize();
+  }
+
+  String get _snapshotDir => '${RuntimeEnvir.configPath}/scripts_snapshot';
+
+  /// 快照: 将当前 scriptsDir 下所有 .lua 复制到快照目录。
+  void _snapshot() {
+    final src = Directory(scriptsDir);
+    final dst = Directory(_snapshotDir);
+    if (dst.existsSync()) dst.deleteSync(recursive: true);
+    dst.createSync(recursive: true);
+    for (final f in src.listSync(recursive: true)) {
+      if (f is File && f.path.endsWith('.lua')) {
+        final rel = f.path.substring(src.path.length + 1);
+        final target = File('${dst.path}/$rel');
+        target.parent.createSync(recursive: true);
+        f.copySync(target.path);
+      }
+    }
+  }
+
+  /// 从快照目录恢复所有 .lua 到 scriptsDir (覆盖), 再 reload。
+  Future<void> _restoreFromSnapshot() async {
+    final src = Directory(_snapshotDir);
+    final dst = Directory(scriptsDir);
+    if (!src.existsSync()) return;
+    for (final f in dst.listSync(recursive: true)) {
+      if (f is File && f.path.endsWith('.lua')) f.deleteSync();
+    }
+    for (final f in src.listSync(recursive: true)) {
+      if (f is File && f.path.endsWith('.lua')) {
+        final rel = f.path.substring(src.path.length + 1);
+        final target = File('${dst.path}/$rel');
+        target.parent.createSync(recursive: true);
+        f.copySync(target.path);
+      }
+    }
+    await reload();
+    stateRevision.value++;
+  }
+
+  /// 快照保护式热重载: 重载成功后弹出 15s 倒计时对话框, 允许保留或回退。
+  /// 重载中途 Lua 语法错误 → 自动回退快照。
+  Future<void> reloadWithGuard() async {
+    final ctx = Get.context;
+    if (ctx == null || !ctx.mounted) return;
+    _snapshot();
+    await reload();
+    if (lastError != null) {
+      await _restoreFromSnapshot();
+      _toast('脚本加载失败, 已自动回退:\n$lastError');
+      return;
+    }
+    stateRevision.value++;
+    _showApplyCountdown();
+  }
+
+  /// 15s 倒计时对话框: 保留/回退。
+  Future<void> _showApplyCountdown() async {
+    final ctx = Get.context;
+    if (ctx == null || !ctx.mounted) return;
+    await Get.dialog<Object?>(
+      _CountdownDialog(
+        title: '脚本已应用',
+        onKeep: () {
+          Directory(_snapshotDir).deleteSync(recursive: true);
+        },
+        onRollback: () async {
+          await _restoreFromSnapshot();
+          _toast('已回退到快照');
+        },
+      ),
+      barrierDismissible: false,
+    );
   }
 
   Future<void> _releaseDefaultScripts() async {
@@ -383,6 +457,12 @@ class ScriptManager {
     });
     // 原语: 在 [start,end] 范围内找一个可绑定的空闲端口 (跳过 exclude 列表)
     // 通用能力, 无任何 AstrBot/NapCat 语义; cb(port|nil)
+    e.registerHandler('request_reload', (_) {
+      // 延迟到当前 Lua 调用返回后再重载, 避免在回调中关闭 lua_State
+      Future.delayed(const Duration(milliseconds: 50), reloadWithGuard);
+      return null;
+    });
+
     e.registerHandler('free_port', (a) {
       final start = a.isNotEmpty && a[0] is int ? a[0] as int : 1024;
       final end = a.length > 1 && a[1] is int ? a[1] as int : 65535;
@@ -784,5 +864,79 @@ class ScriptManager {
     Future.delayed(const Duration(seconds: 1), controller.dispose);
     cb?.call([result]);
     cb?.dispose();
+  }
+}
+
+/// 15s 倒计时对话框: 保留/回退 脚本修改。
+class _CountdownDialog extends StatefulWidget {
+  final String title;
+  final VoidCallback onKeep;
+  final VoidCallback onRollback;
+  const _CountdownDialog({
+    required this.title,
+    required this.onKeep,
+    required this.onRollback,
+  });
+
+  @override
+  State<_CountdownDialog> createState() => _CountdownDialogState();
+}
+
+class _CountdownDialogState extends State<_CountdownDialog> {
+  int _seconds = 15;
+  late final Timer _timer;
+  bool _resolved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_resolved) return;
+      setState(() {
+        _seconds--;
+        if (_seconds <= 0) {
+          _resolved = true;
+          _timer.cancel();
+          widget.onRollback();
+          _close();
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  void _resolve(VoidCallback action) {
+    if (_resolved) return;
+    _resolved = true;
+    _timer.cancel();
+    action();
+    _close();
+  }
+
+  void _close() {
+    if (Get.isDialogOpen ?? false) Get.back();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Text('${_seconds}s 后自动回退。请确认脚本正常工作后点击"保留更改"。'),
+      actions: [
+        TextButton(
+          onPressed: _resolved ? null : () => _resolve(widget.onRollback),
+          child: const Text('回退'),
+        ),
+        TextButton(
+          onPressed: _resolved ? null : () => _resolve(widget.onKeep),
+          child: const Text('保留更改'),
+        ),
+      ],
+    );
   }
 }

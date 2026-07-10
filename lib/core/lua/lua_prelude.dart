@@ -33,6 +33,7 @@ function host.stop(key) return __host_call("stop", key) end
 function host.free_port(start, stop, exclude, cb) return __host_call("free_port", start, stop, exclude or {}, cb) end
 function host.install_rootfs(cb) return __host_call("install_rootfs", cb) end
 -- 延时回调 (Lua 无 sleep): host.delay(ms, function() end)
+function host.request_reload() return __host_call("request_reload") end
 function host.delay(ms, cb) return __host_call("delay", ms, cb) end
 host.clipboard = {
   copy  = function(s) return __host_call("clipboard_copy", tostring(s)) end,

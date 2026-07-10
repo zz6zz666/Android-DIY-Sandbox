@@ -24,6 +24,9 @@ export HOME_PATH=${RuntimeEnvir.homePath}
 export UBUNTU_PATH=$ubuntuPath
 export UBUNTU=${Config.ubuntuFileName}
 export UBUNTU_NAME=$ubuntuName
+# app 层 Lua 脚本目录, 绑定进容器供 opencode web 定制编辑
+# App-layer Lua scripts dir, bind-mounted into the container for opencode web to edit
+export LUA_RUNTIME_PATH=${RuntimeEnvir.configPath}/scripts
 export L_NOT_INSTALLED=${S.current.uninstalled}
 export L_INSTALLING=${S.current.installing}
 export L_INSTALLED=${S.current.installed}
@@ -469,6 +472,8 @@ login_ubuntu(){
   # - 绑定常见伪文件系统与外部存储，保障交互和软件包管理工作正常。
   # 在 proot 环境中创建 /storage/emulated 目录
   mkdir -p "$UBUNTU_PATH/storage/emulated" 2>/dev/null
+  # 确保 app 层 Lua 脚本目录存在, 以便 bind mount
+  mkdir -p "$LUA_RUNTIME_PATH" 2>/dev/null
   # 获取Android系统的时区设置
   ANDROID_TZ=$(getprop persist.sys.timezone 2>/dev/null)
   if [ -z "$ANDROID_TZ" ]; then
@@ -496,6 +501,7 @@ login_ubuntu(){
     -b /proc/self/fd/2:/dev/stderr \
     -b /storage/emulated/0:/sdcard \
     -b /storage/emulated/0:/storage/emulated/0 \
+    -b "$LUA_RUNTIME_PATH":/app-lua-runtime \
     $BIND_ARGS \
     -w /root \
     /usr/bin/env -i \
