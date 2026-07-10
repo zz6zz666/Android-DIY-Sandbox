@@ -5,11 +5,11 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
-/// WebView 控制器封装。
+/// WebUI 渲染: 使用系统 WebView (webview_flutter)。
 ///
-/// 全部走 webview_flutter 的系统 `android.webkit.WebView`; 该 WebView 在启动时
-/// 已被 WebViewUpgrade 用内置的现代 Chromium 内核 (assets/webview/webview.apk)
-/// 接管, 因此新旧设备统一获得现代渲染, 无需分后端。
+/// 现代设备的系统 WebView 即最新 Chromium, 渲染完整、稳定、无体积负担。
+/// (浏览器引擎与 OS 合成器深度集成, 这是 Flutter 里唯一可靠的 WebView 方案;
+/// 内置第三方引擎会与 Flutter 合成器抢 GPU 而崩溃。)
 abstract class AppWebController {
   Widget buildView();
   Future<void> loadUrl(String url);
@@ -54,7 +54,6 @@ class AppWeb {
     }
   }
 
-  /// 载入完成后注入: 固定视口宽度并禁用双指/双击缩放。
   static const String disableZoomJs = '''
     (function() {
       if (window.__wvZoomPatched) return;
@@ -78,7 +77,7 @@ class AppWeb {
   ''';
 }
 
-/// 系统 WebView (webview_flutter) 后端。
+/// 系统 WebView 后端。
 class SystemWebController implements AppWebController {
   late final WebViewController _c;
   final bool _interceptExternal;

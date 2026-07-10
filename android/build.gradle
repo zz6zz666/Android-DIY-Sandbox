@@ -1,6 +1,6 @@
 allprojects {
     repositories {
-        // 国内镜像 (added by opencode)
+        // 国内镜像
         maven { url 'https://maven.aliyun.com/repository/public' }
         maven { url 'https://maven.aliyun.com/repository/google' }
         maven { url 'https://maven.aliyun.com/repository/central' }
