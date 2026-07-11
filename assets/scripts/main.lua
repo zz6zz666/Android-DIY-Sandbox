@@ -17,7 +17,8 @@ end
 function ports.set(name, v) host.set(ports.key[name], v) end
 
 nav.tabs({
-  { title = "主页",  icon = "home",     page = "home" },
+  { title = "主页",  icon = "home_outlined",     page = "home" },
+  { title = "组件",  icon = "widgets",  page = "gallery" },
   { title = "WebUI", icon = "language", page = webview("http://127.0.0.1:" .. ports.get("dashboard")) },
   { title = "终端",  icon = "terminal", page = terminal() },
 })
@@ -1006,7 +1007,7 @@ local function env_card()
       end, { variant = "tonal" }),
     })
   end
-  return expansion("环境管理", children, { icon = "build" })
+  return expansion("环境管理", children, { icon = "build_outlined" })
 end
 
 local function add_napcat()
@@ -1033,7 +1034,7 @@ local function bind_bot_dialog(ins)
       if data.state == "mismatch" then
         kids[#kids + 1] = button("修复绑定", function()
           NC.repair(id, function() reload() end)
-        end, { variant = "tonal", icon = "build" })
+        end, { variant = "tonal", icon = "build_outlined" })
       end
       kids[#kids + 1] = text("websocket 适配器", { weight = "bold" })
       local clients = data.clients or {}
@@ -1198,11 +1199,11 @@ end
 local function manage_section()
   return expansion("AstrBot 管理", {
     tile("覆盖安装插件依赖", {
-      icon = "build", subtitle = "重新安装 AstrBot 并覆盖插件依赖",
+      icon = "build_outlined", subtitle = "重新安装 AstrBot 并覆盖插件依赖",
       trailing = button("执行", function() step_astrbot(false, true) end, { variant = "tonal" }),
     }),
     tile("备份 AstrBot 数据", {
-      icon = "backup", subtitle = "打包 data 到下载目录",
+      icon = "backup_outlined", subtitle = "打包 data 到下载目录",
       trailing = button("备份", function() do_backup() end, { variant = "tonal" }),
     }),
     tile("还原 AstrBot 数据", {
@@ -1210,7 +1211,7 @@ local function manage_section()
       trailing = button("还原", do_restore, { variant = "tonal" }),
     }),
     tile("清除 AstrBot 数据", {
-      icon = "delete", subtitle = "删除 data 数据目录 (不可恢复)",
+      icon = "delete_outline", subtitle = "删除 data 数据目录 (不可恢复)",
       trailing = button("清除", function()
         host.confirm("确定要清除 AstrBot 数据吗?", function(yes)
           if yes then host.delete_dir(host.ubuntu_path() .. "/root/AstrBot/data"); host.exit_app() end
@@ -1225,7 +1226,7 @@ local function manage_section()
         end)
       end, { danger = true }),
     }),
-  }, { icon = "settings" })
+  }, { icon = "settings_outlined" })
 end
 
 app.page("home", function(ctx)
@@ -1243,12 +1244,114 @@ app.page("home", function(ctx)
   }
 end)
 
+-- ============================================================
+-- 组件画廊: 演示扩展后的全量图标与新组件 (验证 Lua UI 与原生拉齐)
+-- ============================================================
+app.page("gallery", function(ctx)
+  local seg = state("g_seg", "a")
+  local rad = state("g_rad", 2)
+  local rng_lo = state("g_lo", 20)
+  local rng_hi = state("g_hi", 70)
+  return {
+    card("任意图标 (全量 Material)", {
+      wrap({
+        icon("rocket_launch", { size = 30, color = "deepPurple" }),
+        icon("favorite", { size = 30, color = "pink.400" }),
+        icon("thunderstorm", { size = 30, color = "blue.700" }),
+        icon("emoji_emotions", { size = 30, color = "amber" }),
+        icon("pets", { size = 30, color = "brown" }),
+        icon("bakery_dining", { size = 30, color = "orange" }),
+        icon("sports_esports", { size = 30, color = "teal" }),
+        icon("diamond", { size = 30, color = "cyan" }),
+      }, { spacing = 14, runSpacing = 10 }),
+    }),
+    card("按钮 / FAB", {
+      row({
+        button("Filled", function() host.toast("filled") end),
+        button("Tonal", function() end, { variant = "tonal" }),
+        button("Outlined", function() end, { variant = "outlined" }),
+      }, { gap = 8, main = "start" }),
+      spacer(8),
+      row({
+        fab("add", function() host.toast("fab") end, { mini = true }),
+        spacer(12),
+        fab("navigation", function() end, { label = "导航", color = "indigo" }),
+      }, { main = "start", cross = "center" }),
+    }),
+    card("分段 / 单选 / 开关", {
+      segmented({
+        value = seg.get(),
+        options = {
+          { label = "日", value = "a", icon = "wb_sunny" },
+          { label = "周", value = "b", icon = "calendar_view_week" },
+          { label = "月", value = "c", icon = "calendar_month" },
+        },
+        onChanged = function(v) seg.set(v) end,
+      }),
+      radio({
+        title = "优先级",
+        value = rad.get(),
+        axis = "horizontal",
+        options = {
+          { label = "低", value = 1 },
+          { label = "中", value = 2 },
+          { label = "高", value = 3 },
+        },
+        onChanged = function(v) rad.set(v) end,
+      }),
+      toggle({ title = "启用通知", value = true, onChanged = function(v) host.toast(tostring(v)) end }),
+    }),
+    card("区间滑块 / 头像 / 进度", {
+      rangeslider({
+        min = 0, max = 100, low = rng_lo.get(), high = rng_hi.get(),
+        divisions = 20,
+        onChanged = function(lo, hi) rng_lo.set(lo); rng_hi.set(hi) end,
+      }),
+      text(string.format("范围: %d - %d", rng_lo.get(), rng_hi.get()), { color = "grey" }),
+      spacer(8),
+      row({
+        avatar({ icon = "person", radius = 22, color = "blue" }),
+        avatar({ text = "AI", radius = 22, color = "deepPurple" }),
+        avatar({ icon = "smart_toy", radius = 22, color = "teal" }),
+      }, { gap = 12, main = "start" }),
+      spacer(10),
+      progress(0.65, { color = "green" }),
+    }),
+    card("网格布局", {
+      grid({
+        box({ height = 60, child = center(icon("looks_one", { size = 30, color = "white" })),
+          style = { bg = "red", radius = 10 } }),
+        box({ height = 60, child = center(icon("looks_two", { size = 30, color = "white" })),
+          style = { bg = "green", radius = 10 } }),
+        box({ height = 60, child = center(icon("looks_3", { size = 30, color = "white" })),
+          style = { bg = "blue", radius = 10 } }),
+        box({ height = 60, child = center(icon("looks_4", { size = 30, color = "white" })),
+          style = { bg = "orange", radius = 10 } }),
+      }, { columns = 4, gap = 8, ratio = 1 }),
+    }),
+    card("渐变 / 阴影 / 变换", {
+      row({
+        box({ width = 70, height = 70, child = center(text("渐变", { color = "white" })),
+          style = { gradient = { colors = {"purple", "blue"} }, radius = 12 } }),
+        box({ width = 70, height = 70, child = center(icon("bolt", { color = "white" })),
+          style = { bg = "orange", radius = 12, shadow = true } }),
+        box({ width = 70, height = 70, child = center(icon("star", { color = "amber" })),
+          style = { bg = "#222222", radius = 12, rotate = 0.2 } }),
+      }, { gap = 12, main = "start" }),
+    }),
+    card("日期 / 时间", {
+      datefield({ label = "选择日期", onChanged = function(y,m,d) host.toast(y.."-"..m.."-"..d) end }),
+      timefield({ label = "选择时间", onChanged = function(h,m) host.toast(h..":"..m) end }),
+    }),
+  }
+end)
+
 -- 主页顶栏自定义按钮 (设置按钮左侧): DIY = 启动 opencode 引擎并打开 WebUI
 app.actions({
   { icon = "construction", tooltip = "DIY 脚本定制", onTap = function()
     agent.launch("/app-lua-runtime", "opencode-lua")
   end },
-  { icon = "smart_toy", tooltip = "opencode AI 助手", onTap = function()
+  { icon = "smart_toy_outlined", tooltip = "opencode AI 助手", onTap = function()
     agent.launch()
   end },
 })

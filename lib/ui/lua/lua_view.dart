@@ -8,60 +8,33 @@ import '../../core/lua/script_manager.dart';
 import '../widgets/glass_panel.dart';
 import '../widgets/tab_strip.dart';
 import '../pages/love/love_game_view.dart';
+import 'material_icons_map.g.dart';
 
-/// 字符串图标名 -> IconData (运行时无法反射查图标, 故用静态映射表)。
-const Map<String, IconData> _kIcons = {
-  'home': Icons.home_outlined,
-  'dashboard': Icons.dashboard_outlined,
-  'language': Icons.language,
-  'terminal': Icons.terminal,
-  'lan': Icons.lan_outlined,
-  'settings_ethernet': Icons.settings_ethernet,
-  'refresh': Icons.refresh,
-  'delete': Icons.delete_outline,
-  'restart_alt': Icons.restart_alt,
-  'backup': Icons.backup_outlined,
-  'restore': Icons.restore,
-  'build': Icons.build_outlined,
-  'science': Icons.science_outlined,
-  'folder': Icons.folder_outlined,
-  'code': Icons.code,
-  'battery': Icons.battery_saver,
-  'exit': Icons.exit_to_app,
-  'info': Icons.info_outline,
-  'image': Icons.image_outlined,
-  'layers': Icons.layers_outlined,
-  'blur': Icons.blur_on,
-  'privacy': Icons.privacy_tip_outlined,
-  'settings': Icons.settings_outlined,
-  'play': Icons.play_arrow,
-  'play_circle': Icons.play_circle,
-  'pause_circle': Icons.pause_circle_outline,
-  'stop': Icons.stop,
-  'link': Icons.link,
-  'download': Icons.download,
-  'upload': Icons.upload,
-  'edit': Icons.edit_outlined,
-  'add': Icons.add,
-  'more': Icons.more_vert,
-  'star': Icons.star_outline,
-  'bug': Icons.bug_report_outlined,
-  'extension': Icons.extension,
-  'construction': Icons.construction,
-  'pets': Icons.pets,
-  'check_circle': Icons.check_circle,
-  'error': Icons.error_outline,
-  'lock': Icons.lock_outline,
-  'copy': Icons.copy,
-  'logout': Icons.logout,
-  'qr': Icons.qr_code,
-  'warning': Icons.warning_amber,
-  'smart_toy': Icons.smart_toy_outlined,
-  'rocket': Icons.rocket_launch,
-  'chat': Icons.chat_bubble_outline,
-};
-
-IconData? luaIconFor(Object? name) => name == null ? null : _kIcons[name.toString()];
+/// 将 Lua 传入的图标标识解析为 IconData。
+/// 统一规则 (无任何历史别名/特例):
+///  1. 数值 codepoint:      icon(0xe88a)
+///  2. "0x" 前缀的字符串:    icon("0xe88a")
+///  3. Material 规范名:      icon("home") / icon("home_outlined") / icon("rocket_launch")
+/// 名称即 Flutter `Icons.<name>` 的标识符 (见 material_icons_map.g.dart, 全量 8000+)。
+/// 依赖 --no-tree-shake-icons 构建 (运行时动态构造 IconData)。
+IconData? luaIconFor(Object? name) {
+  if (name == null) return null;
+  if (name is num) {
+    return IconData(name.toInt(), fontFamily: 'MaterialIcons');
+  }
+  final s = name.toString();
+  if (s.startsWith('0x') || s.startsWith('0X')) {
+    final cp = int.tryParse(s.substring(2), radix: 16);
+    if (cp != null) return IconData(cp, fontFamily: 'MaterialIcons');
+  }
+  final cp = kMaterialIconCodepoints[s];
+  if (cp == null) return null;
+  return IconData(
+    cp,
+    fontFamily: 'MaterialIcons',
+    matchTextDirection: kMaterialIconRtl.contains(s),
+  );
+}
 
 // ============================ 样式系统 ============================
 
@@ -69,45 +42,143 @@ class LuaStyle {
   static num? _num(Object? v) => v is num ? v : num.tryParse('${v ?? ''}');
   static double? _d(Object? v) => _num(v)?.toDouble();
 
+  /// Material 全色板 (MaterialColor / MaterialAccentColor)。
+  static const Map<String, MaterialColor> _swatches = {
+    'red': Colors.red,
+    'pink': Colors.pink,
+    'purple': Colors.purple,
+    'deepPurple': Colors.deepPurple,
+    'indigo': Colors.indigo,
+    'blue': Colors.blue,
+    'lightBlue': Colors.lightBlue,
+    'cyan': Colors.cyan,
+    'teal': Colors.teal,
+    'green': Colors.green,
+    'lightGreen': Colors.lightGreen,
+    'lime': Colors.lime,
+    'yellow': Colors.yellow,
+    'amber': Colors.amber,
+    'orange': Colors.orange,
+    'deepOrange': Colors.deepOrange,
+    'brown': Colors.brown,
+    'grey': Colors.grey,
+    'gray': Colors.grey,
+    'blueGrey': Colors.blueGrey,
+  };
+
+  static const Map<String, Color> _basics = {
+    'white': Colors.white,
+    'black': Colors.black,
+    'transparent': Colors.transparent,
+    'white70': Colors.white70,
+    'white54': Colors.white54,
+    'white38': Colors.white38,
+    'white12': Colors.white12,
+    'black87': Colors.black87,
+    'black54': Colors.black54,
+    'black38': Colors.black38,
+    'black26': Colors.black26,
+    'black12': Colors.black12,
+    'redAccent': Colors.redAccent,
+    'pinkAccent': Colors.pinkAccent,
+    'purpleAccent': Colors.purpleAccent,
+    'deepPurpleAccent': Colors.deepPurpleAccent,
+    'indigoAccent': Colors.indigoAccent,
+    'blueAccent': Colors.blueAccent,
+    'lightBlueAccent': Colors.lightBlueAccent,
+    'cyanAccent': Colors.cyanAccent,
+    'tealAccent': Colors.tealAccent,
+    'greenAccent': Colors.greenAccent,
+    'lightGreenAccent': Colors.lightGreenAccent,
+    'limeAccent': Colors.limeAccent,
+    'yellowAccent': Colors.yellowAccent,
+    'amberAccent': Colors.amberAccent,
+    'orangeAccent': Colors.orangeAccent,
+    'deepOrangeAccent': Colors.deepOrangeAccent,
+  };
+
+  /// 解析颜色。支持:
+  ///  - #RGB / #RRGGBB / #AARRGGBB (十六进制)
+  ///  - 主题色: primary/onPrimary/secondary/tertiary/error/surface/onSurface/background/outline...
+  ///  - Material 色板名: red/blue/teal... 可带 shade: "blue.700" / "red.300" / "orange.A200"
+  ///  - 基础色: white/black/transparent/white70/black54...
+  ///  - {r,g,b,a} 表 (0-255, a 0-1 或 0-255)
   static Color? color(Object? v, BuildContext ctx) {
     if (v == null) return null;
+    if (v is Map) {
+      final r = (_num(v['r']) ?? 0).toInt().clamp(0, 255);
+      final g = (_num(v['g']) ?? 0).toInt().clamp(0, 255);
+      final b = (_num(v['b']) ?? 0).toInt().clamp(0, 255);
+      final an = _num(v['a']);
+      final a = an == null ? 255 : (an <= 1 ? (an * 255).round() : an.toInt()).clamp(0, 255);
+      return Color.fromARGB(a, r, g, b);
+    }
     final s = v.toString();
     if (s.startsWith('#')) {
       var hex = s.substring(1);
+      if (hex.length == 3) {
+        hex = hex.split('').map((c) => '$c$c').join();
+      }
       if (hex.length == 6) hex = 'FF$hex';
       final val = int.tryParse(hex, radix: 16);
       return val == null ? null : Color(val);
+    }
+    // 色板带 shade: "blue.700" / "orange.A200"
+    if (s.contains('.')) {
+      final parts = s.split('.');
+      final sw = _swatches[parts[0]];
+      if (sw != null) return _shade(sw, parts[1]);
     }
     final cs = Theme.of(ctx).colorScheme;
     switch (s) {
       case 'primary':
         return cs.primary;
+      case 'onPrimary':
+        return cs.onPrimary;
+      case 'primaryContainer':
+        return cs.primaryContainer;
       case 'secondary':
         return cs.secondary;
+      case 'onSecondary':
+        return cs.onSecondary;
+      case 'secondaryContainer':
+        return cs.secondaryContainer;
+      case 'tertiary':
+        return cs.tertiary;
       case 'error':
         return cs.error;
+      case 'onError':
+        return cs.onError;
+      case 'errorContainer':
+        return cs.errorContainer;
       case 'surface':
         return cs.surface;
       case 'onSurface':
         return cs.onSurface;
-      case 'white':
-        return Colors.white;
-      case 'black':
-        return Colors.black;
-      case 'red':
-        return Colors.red;
-      case 'green':
-        return Colors.green;
-      case 'orange':
-        return Colors.orange;
-      case 'blue':
-        return Colors.blue;
-      case 'grey':
-      case 'gray':
-        return Colors.grey;
-      default:
-        return null;
+      case 'surfaceVariant':
+        return cs.surfaceContainerHighest;
+      case 'onSurfaceVariant':
+        return cs.onSurfaceVariant;
+      case 'background':
+        return cs.surface;
+      case 'outline':
+        return cs.outline;
+      case 'shadow':
+        return cs.shadow;
     }
+    final basic = _basics[s];
+    if (basic != null) return basic;
+    final sw = _swatches[s];
+    if (sw != null) return sw;
+    return null;
+  }
+
+  static Color? _shade(MaterialColor sw, String shade) {
+    final n = int.tryParse(shade);
+    if (n == null) return sw;
+    const valid = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900];
+    final pick = valid.contains(n) ? n : 500;
+    return sw[pick] ?? sw;
   }
 
   static FontWeight? weight(Object? v) {
@@ -203,35 +274,134 @@ class LuaStyle {
     }
   }
 
-  /// 用通用样式属性包裹子组件 (margin/width/height/bg/radius/border/align/opacity)。
+  /// 用通用样式属性包裹子组件。
+  /// 支持: width/height/minWidth/maxWidth/minHeight/maxHeight,
+  ///       padding/margin, bg/gradient, radius, border/borderWidth,
+  ///       shadow(bool 或 {color,blur,dx,dy,spread}), opacity, align,
+  ///       rotate(弧度)/scale, aspectRatio, flex(在 Flex 中扩展)。
   static Widget wrap(Widget child, Map? style, BuildContext ctx) {
     if (style == null) return child;
     var w = child;
     final bg = color(style['bg'], ctx);
     final radius = _d(style['radius']);
     final border = color(style['border'], ctx);
+    final borderWidth = _d(style['borderWidth']);
     final width = _d(style['width']);
     final height = _d(style['height']);
     final pad = edge(style['padding']);
     final margin = edge(style['margin']);
     final opacity = _d(style['opacity']);
+    final gradient = _gradient(style['gradient'], ctx);
+    final shadow = _shadows(style['shadow'], ctx);
+    final br = radius == null ? null : BorderRadius.circular(radius);
+
     if (opacity != null) w = Opacity(opacity: opacity, child: w);
-    if (bg != null || radius != null || border != null || pad != null || width != null || height != null) {
+
+    final hasDecoration = bg != null ||
+        radius != null ||
+        border != null ||
+        gradient != null ||
+        shadow != null ||
+        pad != null ||
+        width != null ||
+        height != null;
+    if (hasDecoration) {
       w = Container(
         width: width,
         height: height,
         padding: pad,
         decoration: BoxDecoration(
-          color: bg,
-          borderRadius: radius == null ? null : BorderRadius.circular(radius),
-          border: border == null ? null : Border.all(color: border),
+          color: gradient == null ? bg : null,
+          gradient: gradient,
+          borderRadius: br,
+          boxShadow: shadow,
+          border: border == null
+              ? null
+              : Border.all(color: border, width: borderWidth ?? 1),
         ),
         child: w,
       );
     }
+
+    // 约束
+    final minW = _d(style['minWidth']);
+    final maxW = _d(style['maxWidth']);
+    final minH = _d(style['minHeight']);
+    final maxH = _d(style['maxHeight']);
+    if (minW != null || maxW != null || minH != null || maxH != null) {
+      w = ConstrainedBox(
+        constraints: BoxConstraints(
+          minWidth: minW ?? 0,
+          maxWidth: maxW ?? double.infinity,
+          minHeight: minH ?? 0,
+          maxHeight: maxH ?? double.infinity,
+        ),
+        child: w,
+      );
+    }
+
+    final aspect = _d(style['aspectRatio']);
+    if (aspect != null) w = AspectRatio(aspectRatio: aspect, child: w);
+
+    // 变换
+    final rotate = _d(style['rotate']);
+    final scale = _d(style['scale']);
+    if (rotate != null) w = Transform.rotate(angle: rotate, child: w);
+    if (scale != null) w = Transform.scale(scale: scale, child: w);
+
+    if (radius != null && (bg != null || gradient != null)) {
+      w = ClipRRect(borderRadius: br!, child: w);
+    }
+
     if (margin != null) w = Padding(padding: margin, child: w);
     if (style['align'] != null) w = Align(alignment: alignment(style['align']), child: w);
     return w;
+  }
+
+  static List<BoxShadow>? _shadows(Object? v, BuildContext ctx) {
+    if (v == null || v == false) return null;
+    if (v == true) {
+      return [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.18),
+          blurRadius: 8,
+          offset: const Offset(0, 3),
+        ),
+      ];
+    }
+    if (v is Map) {
+      return [
+        BoxShadow(
+          color: color(v['color'], ctx) ?? Colors.black.withValues(alpha: 0.2),
+          blurRadius: _d(v['blur']) ?? 8,
+          spreadRadius: _d(v['spread']) ?? 0,
+          offset: Offset(_d(v['dx']) ?? 0, _d(v['dy']) ?? 3),
+        ),
+      ];
+    }
+    return null;
+  }
+
+  static Gradient? _gradient(Object? v, BuildContext ctx) {
+    if (v is! Map) return null;
+    final colorsList = v['colors'];
+    final colors = <Color>[];
+    if (colorsList is List) {
+      for (final c in colorsList) {
+        final col = color(c, ctx);
+        if (col != null) colors.add(col);
+      }
+    }
+    if (colors.length < 2) return null;
+    final type = '${v['type'] ?? 'linear'}';
+    if (type == 'radial') {
+      return RadialGradient(colors: colors, radius: _d(v['radius']) ?? 0.5);
+    }
+    return LinearGradient(
+      colors: colors,
+      begin: v['begin'] != null ? alignment(v['begin']) : Alignment.centerLeft,
+      end: v['end'] != null ? alignment(v['end']) : Alignment.centerRight,
+    );
   }
 }
 
@@ -375,16 +545,75 @@ class LuaRenderer {
             children: _children(context, node['children']),
           ),
         );
+      case 'flexible':
+        return Flexible(
+          flex: (LuaStyle._num(node['flex']) ?? 1).toInt(),
+          fit: node['tight'] == true ? FlexFit.tight : FlexFit.loose,
+          child: build(context, node['child']),
+        );
+      case 'positioned':
+        return Positioned(
+          left: LuaStyle._d(node['left']),
+          top: LuaStyle._d(node['top']),
+          right: LuaStyle._d(node['right']),
+          bottom: LuaStyle._d(node['bottom']),
+          width: LuaStyle._d(node['width']),
+          height: LuaStyle._d(node['height']),
+          child: build(context, node['child']),
+        );
+      case 'aspect':
+        return AspectRatio(
+          aspectRatio: LuaStyle._d(node['ratio']) ?? 1,
+          child: build(context, node['child']),
+        );
+      case 'fitted':
+        return FittedBox(
+          fit: _boxFit(node['fit']),
+          child: build(context, node['child']),
+        );
+      case 'safearea':
+        return SafeArea(child: build(context, node['child']));
+      case 'intrinsic_height':
+        return IntrinsicHeight(child: build(context, node['child']));
+      case 'intrinsic_width':
+        return IntrinsicWidth(child: build(context, node['child']));
+      case 'clip':
+        final shape = '${node['shape'] ?? 'rrect'}';
+        if (shape == 'oval' || shape == 'circle') {
+          return ClipOval(child: build(context, node['child']));
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(LuaStyle._d(node['radius']) ?? 8),
+          child: build(context, node['child']),
+        );
+      case 'grid':
+        return _grid(context, node);
+      case 'list':
+        return _list(context, node);
+      case 'table':
+        return _table(context, node);
+      case 'gesture':
+      case 'inkwell':
+        return _gesture(context, node);
+      case 'tooltip':
+        return Tooltip(
+          message: '${node['message'] ?? node['text'] ?? ''}',
+          child: build(context, node['child']),
+        );
 
       // 内容
       case 'text':
         return _text(context, node);
+      case 'richtext':
+        return _richText(context, node);
       case 'icon':
         return Icon(
           luaIconFor(node['icon']),
           size: LuaStyle._d(node['size']),
           color: LuaStyle.color(node['color'], context),
         );
+      case 'avatar':
+        return _avatar(context, node);
       case 'image':
         return _image(node);
       case 'spinner':
@@ -392,21 +621,44 @@ class LuaRenderer {
           child: SizedBox(
             width: LuaStyle._d(node['size']) ?? 22,
             height: LuaStyle._d(node['size']) ?? 22,
-            child: const CircularProgressIndicator(strokeWidth: 2),
+            child: CircularProgressIndicator(
+              strokeWidth: LuaStyle._d(node['stroke']) ?? 2,
+              value: LuaStyle._d(node['value']),
+              color: LuaStyle.color(node['color'], context),
+            ),
           ),
         );
       case 'progress':
         final v = LuaStyle._d(node['value']);
-        return LinearProgressIndicator(value: v);
+        return LinearProgressIndicator(
+          value: v,
+          minHeight: LuaStyle._d(node['height']),
+          color: LuaStyle.color(node['color'], context),
+          backgroundColor: LuaStyle.color(node['track'], context),
+        );
       case 'chip':
         return _chip(context, node);
       case 'badge':
         return Badge(
           label: node['label'] == null ? null : Text('${node['label']}'),
+          isLabelVisible: node['show'] != false,
+          backgroundColor: LuaStyle.color(node['color'], context),
           child: build(context, node['child']),
         );
       case 'divider':
-        return const Divider();
+        return Divider(
+          height: LuaStyle._d(node['height']),
+          thickness: LuaStyle._d(node['thickness']),
+          indent: LuaStyle._d(node['indent']),
+          endIndent: LuaStyle._d(node['endIndent']),
+          color: LuaStyle.color(node['color'], context),
+        );
+      case 'vdivider':
+        return VerticalDivider(
+          width: LuaStyle._d(node['width']),
+          thickness: LuaStyle._d(node['thickness']),
+          color: LuaStyle.color(node['color'], context),
+        );
 
       case 'love':
         final gp = node['game'];
@@ -426,10 +678,13 @@ class LuaRenderer {
       case 'iconbutton':
         return IconButton(
           tooltip: node['tooltip'] == null ? null : '${node['tooltip']}',
+          iconSize: LuaStyle._d(node['size']),
           icon: Icon(luaIconFor(node['icon']),
               color: LuaStyle.color(node['color'], context)),
           onPressed: _tap(node['onTap']),
         );
+      case 'fab':
+        return _fab(context, node);
       case 'menu':
         return _menu(context, node);
       case 'tile':
@@ -438,12 +693,26 @@ class LuaRenderer {
         return _LuaSwitch(props: node, onAction: onAction);
       case 'slider':
         return _LuaSlider(props: node, onAction: onAction);
+      case 'rangeslider':
+        return _LuaRangeSlider(props: node, onAction: onAction);
       case 'select':
         return _LuaSelect(props: node, onAction: onAction);
       case 'textfield':
         return _LuaTextField(props: node, onAction: onAction);
       case 'checkbox':
         return _LuaCheckbox(props: node, onAction: onAction);
+      case 'radio':
+        return _LuaRadioGroup(props: node, onAction: onAction);
+      case 'segmented':
+        return _LuaSegmented(props: node, onAction: onAction);
+      case 'togglebuttons':
+        return _LuaToggleButtons(props: node, onAction: onAction);
+      case 'datefield':
+        return _LuaDateField(props: node, onAction: onAction, mode: 'date');
+      case 'timefield':
+        return _LuaDateField(props: node, onAction: onAction, mode: 'time');
+      case 'stepper':
+        return _LuaStepper(props: node, onAction: onAction);
 
       // 容器
       case 'card':
@@ -481,6 +750,198 @@ class LuaRenderer {
       fn.call(args);
       onAction();
     }
+  }
+
+  static BoxFit _boxFit(Object? v) {
+    switch ('$v') {
+      case 'contain':
+        return BoxFit.contain;
+      case 'cover':
+        return BoxFit.cover;
+      case 'fill':
+        return BoxFit.fill;
+      case 'fitWidth':
+        return BoxFit.fitWidth;
+      case 'fitHeight':
+        return BoxFit.fitHeight;
+      case 'none':
+        return BoxFit.none;
+      case 'scaleDown':
+        return BoxFit.scaleDown;
+      default:
+        return BoxFit.contain;
+    }
+  }
+
+  Widget _gesture(BuildContext context, Map node) {
+    final onTap = node['onTap'];
+    final onLong = node['onLongPress'];
+    final onDouble = node['onDoubleTap'];
+    final child = build(context, node['child']);
+    if (node['__type'] == 'inkwell' || node['ink'] == true) {
+      return InkWell(
+        borderRadius: node['radius'] == null
+            ? null
+            : BorderRadius.circular(LuaStyle._d(node['radius']) ?? 8),
+        onTap: onTap is LuaFunctionRef ? () => _invoke(onTap) : null,
+        onLongPress: onLong is LuaFunctionRef ? () => _invoke(onLong) : null,
+        onDoubleTap: onDouble is LuaFunctionRef ? () => _invoke(onDouble) : null,
+        child: child,
+      );
+    }
+    return GestureDetector(
+      onTap: onTap is LuaFunctionRef ? () => _invoke(onTap) : null,
+      onLongPress: onLong is LuaFunctionRef ? () => _invoke(onLong) : null,
+      onDoubleTap: onDouble is LuaFunctionRef ? () => _invoke(onDouble) : null,
+      behavior: HitTestBehavior.opaque,
+      child: child,
+    );
+  }
+
+  Widget _avatar(BuildContext context, Map node) {
+    final radius = LuaStyle._d(node['radius']) ?? 20;
+    final bg = LuaStyle.color(node['color'], context);
+    final fg = LuaStyle.color(node['textColor'], context);
+    final img = node['image'];
+    if (img != null) {
+      final path = '$img';
+      final provider = path.startsWith('http')
+          ? NetworkImage(path)
+          : FileImage(File(path)) as ImageProvider;
+      return CircleAvatar(radius: radius, backgroundImage: provider);
+    }
+    final iconName = luaIconFor(node['icon']);
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: bg,
+      foregroundColor: fg,
+      child: iconName != null
+          ? Icon(iconName, size: radius)
+          : (node['text'] != null ? Text('${node['text']}') : null),
+    );
+  }
+
+  Widget _richText(BuildContext context, Map node) {
+    final spans = node['spans'];
+    final base = Theme.of(context).textTheme.bodyMedium;
+    final children = <InlineSpan>[];
+    if (spans is List) {
+      for (final s in spans) {
+        if (s is Map) {
+          children.add(TextSpan(
+            text: '${s['text'] ?? ''}',
+            style: base?.copyWith(
+              fontSize: LuaStyle._d(s['size']),
+              fontWeight: LuaStyle.weight(s['weight']),
+              color: LuaStyle.color(s['color'], context),
+              fontStyle: s['italic'] == true ? FontStyle.italic : null,
+              decoration:
+                  s['underline'] == true ? TextDecoration.underline : null,
+            ),
+          ));
+        } else {
+          children.add(TextSpan(text: '$s', style: base));
+        }
+      }
+    }
+    return Text.rich(
+      TextSpan(children: children),
+      textAlign: node['align'] == 'center'
+          ? TextAlign.center
+          : node['align'] == 'right'
+              ? TextAlign.right
+              : null,
+    );
+  }
+
+  Widget _grid(BuildContext context, Map node) {
+    final children = _children(context, node['children']);
+    final cols = (LuaStyle._num(node['columns']) ?? 2).toInt();
+    return GridView.count(
+      crossAxisCount: cols,
+      shrinkWrap: true,
+      physics: node['scroll'] == true
+          ? null
+          : const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: LuaStyle._d(node['gap']) ?? 8,
+      crossAxisSpacing: LuaStyle._d(node['crossGap'] ?? node['gap']) ?? 8,
+      childAspectRatio: LuaStyle._d(node['ratio']) ?? 1,
+      padding: LuaStyle.edge(node['padding']),
+      children: children,
+    );
+  }
+
+  Widget _list(BuildContext context, Map node) {
+    final children = _children(context, node['children']);
+    final horizontal = '${node['axis']}' == 'horizontal';
+    final sep = LuaStyle._d(node['separator']);
+    return ListView.separated(
+      scrollDirection: horizontal ? Axis.horizontal : Axis.vertical,
+      shrinkWrap: node['shrink'] != false,
+      physics: node['scroll'] == true
+          ? null
+          : const NeverScrollableScrollPhysics(),
+      padding: LuaStyle.edge(node['padding']),
+      itemCount: children.length,
+      separatorBuilder: (_, __) => sep == null
+          ? const SizedBox.shrink()
+          : SizedBox(width: horizontal ? sep : 0, height: horizontal ? 0 : sep),
+      itemBuilder: (_, i) => children[i],
+    );
+  }
+
+  Widget _table(BuildContext context, Map node) {
+    final rows = node['rows'];
+    final headers = node['headers'];
+    final columns = <DataColumn>[];
+    if (headers is List) {
+      for (final h in headers) {
+        columns.add(DataColumn(label: h is Map ? build(context, h) : Text('$h')));
+      }
+    }
+    final dataRows = <DataRow>[];
+    if (rows is List) {
+      for (final r in rows) {
+        if (r is List) {
+          dataRows.add(DataRow(
+            cells: [
+              for (final c in r)
+                DataCell(c is Map ? build(context, c) : Text('$c')),
+            ],
+          ));
+        }
+      }
+    }
+    if (columns.isEmpty && dataRows.isNotEmpty) {
+      final n = dataRows.first.cells.length;
+      for (var i = 0; i < n; i++) {
+        columns.add(const DataColumn(label: SizedBox.shrink()));
+      }
+    }
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(columns: columns, rows: dataRows),
+    );
+  }
+
+  Widget _fab(BuildContext context, Map node) {
+    final label = node['label'];
+    final iconName = luaIconFor(node['icon']);
+    final bg = LuaStyle.color(node['color'], context);
+    if (label != null) {
+      return FloatingActionButton.extended(
+        onPressed: _tap(node['onTap']),
+        backgroundColor: bg,
+        icon: iconName == null ? null : Icon(iconName),
+        label: Text('$label'),
+      );
+    }
+    return FloatingActionButton(
+      onPressed: _tap(node['onTap']),
+      backgroundColor: bg,
+      mini: node['mini'] == true,
+      child: Icon(iconName ?? Icons.add),
+    );
   }
 
   Widget _flex(BuildContext context, Map node, Axis axis) {
@@ -928,6 +1389,354 @@ class _LuaCheckboxState extends State<_LuaCheckbox> {
         if (fn is LuaFunctionRef) fn.call([_value]);
         widget.onAction();
       },
+    );
+  }
+}
+
+// -------- 区间滑块 --------
+class _LuaRangeSlider extends StatefulWidget {
+  const _LuaRangeSlider({required this.props, required this.onAction});
+  final Map props;
+  final VoidCallback onAction;
+  @override
+  State<_LuaRangeSlider> createState() => _LuaRangeSliderState();
+}
+
+class _LuaRangeSliderState extends State<_LuaRangeSlider> {
+  late RangeValues _values;
+  @override
+  void initState() {
+    super.initState();
+    final lo = (widget.props['low'] as num?)?.toDouble() ?? 0;
+    final hi = (widget.props['high'] as num?)?.toDouble() ?? 1;
+    _values = RangeValues(lo, hi);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final min = (widget.props['min'] as num?)?.toDouble() ?? 0;
+    final max = (widget.props['max'] as num?)?.toDouble() ?? 1;
+    final divisions = (widget.props['divisions'] as num?)?.toInt();
+    return RangeSlider(
+      values: RangeValues(
+        _values.start.clamp(min, max),
+        _values.end.clamp(min, max),
+      ),
+      min: min,
+      max: max,
+      divisions: divisions,
+      labels: RangeLabels(
+        _values.start.toStringAsFixed(0),
+        _values.end.toStringAsFixed(0),
+      ),
+      onChanged: (v) => setState(() => _values = v),
+      onChangeEnd: (v) {
+        final fn = widget.props['onChanged'];
+        if (fn is LuaFunctionRef) fn.call([v.start, v.end]);
+        widget.onAction();
+      },
+    );
+  }
+}
+
+// -------- 单选组 --------
+class _LuaRadioGroup extends StatefulWidget {
+  const _LuaRadioGroup({required this.props, required this.onAction});
+  final Map props;
+  final VoidCallback onAction;
+  @override
+  State<_LuaRadioGroup> createState() => _LuaRadioGroupState();
+}
+
+class _LuaRadioGroupState extends State<_LuaRadioGroup> {
+  Object? _value;
+  @override
+  void initState() {
+    super.initState();
+    _value = widget.props['value'];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final options = widget.props['options'];
+    final tiles = <Widget>[];
+    final horizontal = '${widget.props['axis']}' == 'horizontal';
+    if (options is List) {
+      for (final o in options) {
+        final val = o is Map ? o['value'] : o;
+        final label = o is Map ? (o['label'] ?? o['value']) : o;
+        final tile = RadioListTile<Object?>(
+          title: Text('$label'),
+          value: val,
+          groupValue: _value,
+          contentPadding: horizontal ? EdgeInsets.zero : null,
+          onChanged: (v) {
+            setState(() => _value = v);
+            final fn = widget.props['onChanged'];
+            if (fn is LuaFunctionRef) fn.call([v]);
+            widget.onAction();
+          },
+        );
+        tiles.add(horizontal ? Expanded(child: tile) : tile);
+      }
+    }
+    if (widget.props['title'] != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text('${widget.props['title']}',
+                style: Theme.of(context).textTheme.labelLarge),
+          ),
+          if (horizontal) Row(children: tiles) else ...tiles,
+        ],
+      );
+    }
+    return horizontal
+        ? Row(children: tiles)
+        : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: tiles);
+  }
+}
+
+// -------- 分段按钮 (单选) --------
+class _LuaSegmented extends StatefulWidget {
+  const _LuaSegmented({required this.props, required this.onAction});
+  final Map props;
+  final VoidCallback onAction;
+  @override
+  State<_LuaSegmented> createState() => _LuaSegmentedState();
+}
+
+class _LuaSegmentedState extends State<_LuaSegmented> {
+  Object? _value;
+  @override
+  void initState() {
+    super.initState();
+    _value = widget.props['value'];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final options = widget.props['options'];
+    final segments = <ButtonSegment<Object?>>[];
+    if (options is List) {
+      for (final o in options) {
+        final val = o is Map ? o['value'] : o;
+        final label = o is Map ? (o['label'] ?? o['value']) : o;
+        final iconName = o is Map ? luaIconFor(o['icon']) : null;
+        segments.add(ButtonSegment<Object?>(
+          value: val,
+          label: Text('$label'),
+          icon: iconName == null ? null : Icon(iconName),
+        ));
+      }
+    }
+    if (segments.isEmpty) return const SizedBox.shrink();
+    return SegmentedButton<Object?>(
+      segments: segments,
+      selected: {_value ?? segments.first.value},
+      showSelectedIcon: widget.props['showCheck'] == true,
+      onSelectionChanged: (s) {
+        setState(() => _value = s.first);
+        final fn = widget.props['onChanged'];
+        if (fn is LuaFunctionRef) fn.call([s.first]);
+        widget.onAction();
+      },
+    );
+  }
+}
+
+// -------- ToggleButtons (多选或单选) --------
+class _LuaToggleButtons extends StatefulWidget {
+  const _LuaToggleButtons({required this.props, required this.onAction});
+  final Map props;
+  final VoidCallback onAction;
+  @override
+  State<_LuaToggleButtons> createState() => _LuaToggleButtonsState();
+}
+
+class _LuaToggleButtonsState extends State<_LuaToggleButtons> {
+  late List<bool> _selected;
+  late List<Widget> _labels;
+  @override
+  void initState() {
+    super.initState();
+    _rebuild();
+  }
+
+  void _rebuild() {
+    final options = widget.props['options'];
+    _labels = [];
+    _selected = [];
+    final sel = widget.props['selected'];
+    final selSet = sel is List ? sel.map((e) => e).toSet() : <Object?>{};
+    if (options is List) {
+      for (var i = 0; i < options.length; i++) {
+        final o = options[i];
+        final label = o is Map ? (o['label'] ?? o['value']) : o;
+        final iconName = o is Map ? luaIconFor(o['icon']) : null;
+        _labels.add(Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: iconName != null ? Icon(iconName) : Text('$label'),
+        ));
+        _selected.add(selSet.contains(i) || selSet.contains(label));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final multi = widget.props['multi'] == true;
+    return ToggleButtons(
+      isSelected: _selected,
+      borderRadius: BorderRadius.circular(8),
+      onPressed: (i) {
+        setState(() {
+          if (multi) {
+            _selected[i] = !_selected[i];
+          } else {
+            for (var j = 0; j < _selected.length; j++) {
+              _selected[j] = j == i;
+            }
+          }
+        });
+        final fn = widget.props['onChanged'];
+        if (fn is LuaFunctionRef) {
+          final active = <int>[];
+          for (var j = 0; j < _selected.length; j++) {
+            if (_selected[j]) active.add(j + 1);
+          }
+          fn.call([i + 1, active]);
+        }
+        widget.onAction();
+      },
+      children: _labels,
+    );
+  }
+}
+
+// -------- 日期/时间选择字段 --------
+class _LuaDateField extends StatefulWidget {
+  const _LuaDateField(
+      {required this.props, required this.onAction, required this.mode});
+  final Map props;
+  final VoidCallback onAction;
+  final String mode;
+  @override
+  State<_LuaDateField> createState() => _LuaDateFieldState();
+}
+
+class _LuaDateFieldState extends State<_LuaDateField> {
+  String? _display;
+  @override
+  void initState() {
+    super.initState();
+    _display = widget.props['value']?.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final iconName =
+        widget.mode == 'time' ? Icons.access_time : Icons.calendar_today;
+    return ListTile(
+      leading: Icon(iconName),
+      title: Text('${widget.props['label'] ?? (widget.mode == 'time' ? '选择时间' : '选择日期')}'),
+      subtitle: _display == null ? null : Text(_display!),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () async {
+        if (widget.mode == 'time') {
+          final t = await showTimePicker(
+              context: context, initialTime: TimeOfDay.now());
+          if (t != null) {
+            setState(() => _display = t.format(context));
+            final fn = widget.props['onChanged'];
+            if (fn is LuaFunctionRef) fn.call([t.hour, t.minute]);
+            widget.onAction();
+          }
+        } else {
+          final now = DateTime.now();
+          final d = await showDatePicker(
+            context: context,
+            initialDate: now,
+            firstDate: DateTime(now.year - 50),
+            lastDate: DateTime(now.year + 50),
+          );
+          if (d != null) {
+            setState(() =>
+                _display = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}');
+            final fn = widget.props['onChanged'];
+            if (fn is LuaFunctionRef) fn.call([d.year, d.month, d.day]);
+            widget.onAction();
+          }
+        }
+      },
+    );
+  }
+}
+
+// -------- 步进器 --------
+class _LuaStepper extends StatefulWidget {
+  const _LuaStepper({required this.props, required this.onAction});
+  final Map props;
+  final VoidCallback onAction;
+  @override
+  State<_LuaStepper> createState() => _LuaStepperState();
+}
+
+class _LuaStepperState extends State<_LuaStepper> {
+  late int _current;
+  @override
+  void initState() {
+    super.initState();
+    _current = ((widget.props['active'] as num?)?.toInt() ?? 1) - 1;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final renderer = LuaRenderer(onAction: widget.onAction);
+    final stepsSpec = widget.props['steps'];
+    final steps = <Step>[];
+    if (stepsSpec is List) {
+      for (var i = 0; i < stepsSpec.length; i++) {
+        final s = stepsSpec[i];
+        final m = s is Map ? s : const {};
+        steps.add(Step(
+          title: Text('${m['title'] ?? ''}'),
+          subtitle: m['subtitle'] == null ? null : Text('${m['subtitle']}'),
+          content: m['content'] == null
+              ? const SizedBox.shrink()
+              : renderer.build(context, m['content']),
+          isActive: i == _current,
+          state: i < _current ? StepState.complete : StepState.indexed,
+        ));
+      }
+    }
+    return Stepper(
+      currentStep: _current.clamp(0, steps.isEmpty ? 0 : steps.length - 1),
+      type: '${widget.props['axis']}' == 'horizontal'
+          ? StepperType.horizontal
+          : StepperType.vertical,
+      physics: const NeverScrollableScrollPhysics(),
+      onStepTapped: (i) {
+        setState(() => _current = i);
+        final fn = widget.props['onStep'];
+        if (fn is LuaFunctionRef) fn.call([i + 1]);
+        widget.onAction();
+      },
+      onStepContinue: () {
+        if (_current < steps.length - 1) setState(() => _current++);
+        final fn = widget.props['onContinue'];
+        if (fn is LuaFunctionRef) fn.call([_current + 1]);
+        widget.onAction();
+      },
+      onStepCancel: () {
+        if (_current > 0) setState(() => _current--);
+        final fn = widget.props['onCancel'];
+        if (fn is LuaFunctionRef) fn.call([_current + 1]);
+        widget.onAction();
+      },
+      steps: steps,
     );
   }
 }

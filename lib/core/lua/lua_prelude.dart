@@ -92,30 +92,66 @@ function padding(child, pad) return comp("padding", { child=child, pad=pad }) en
 function align(child, a)     return comp("align", { child=child, align=a }) end
 function center(child)       return comp("center", { child=child }) end
 function expanded(child, flex) return comp("expanded", { child=child, flex=flex }) end
+function flexible(child, o)  o=o or {}; o.child=child; return comp("flexible", o) end
 function spacer(n)           return comp("spacer", { size=n }) end
 function box(o)              return comp("box", o) end
 function scroll(children, o) o=o or {}; o.children=children; return comp("scroll", o) end
+function positioned(child, o) o=o or {}; o.child=child; return comp("positioned", o) end
+function aspect(child, ratio) return comp("aspect", { child=child, ratio=ratio }) end
+function fitted(child, fit)  return comp("fitted", { child=child, fit=fit }) end
+function safearea(child)     return comp("safearea", { child=child }) end
+function intrinsicHeight(child) return comp("intrinsic_height", { child=child }) end
+function intrinsicWidth(child)  return comp("intrinsic_width", { child=child }) end
+function clip(child, o)      o=o or {}; o.child=child; return comp("clip", o) end
+function grid(children, o)   o=o or {}; o.children=children; return comp("grid", o) end
+function list(children, o)   o=o or {}; o.children=children; return comp("list", o) end
+function datatable(o)        return comp("table", o or {}) end
+-- 手势/点击区域: gesture(child, { onTap=, onLongPress=, onDoubleTap=, ink=true, radius= })
+function gesture(child, o)   o=o or {}; o.child=child; return comp("gesture", o) end
+function inkwell(child, o)   o=o or {}; o.child=child; return comp("inkwell", o) end
+function tooltip(child, msg) return comp("tooltip", { child=child, message=msg }) end
 
 -- 内容
 function text(s, o)   o=o or {}; o.text=s; return comp("text", o) end
+-- richtext({ {text=, color=, weight=, size=, italic=, underline=}, ... }, o)
+function richtext(spans, o) o=o or {}; o.spans=spans; return comp("richtext", o) end
 function icon(name, o) o=o or {}; o.icon=name; return comp("icon", o) end
+-- 头像: avatar({ image=, icon=, text=, radius=, color=, textColor= })
+function avatar(o)   return comp("avatar", o or {}) end
 function image(path, o) o=o or {}; o.path=path; return comp("image", o) end
 function spinner(o)  return comp("spinner", o) end
 function progress(v, o) o=o or {}; o.value=v; return comp("progress", o) end
 function chip(label, o) o=o or {}; o.label=label; return comp("chip", o) end
 function badge(child, o) o=o or {}; o.child=child; return comp("badge", o) end
 function divider(o)  return comp("divider", o) end
+function vdivider(o) return comp("vdivider", o) end
 
 -- 交互
 function button(label, onTap, o) o=o or {}; o.label=label; o.onTap=onTap; return comp("button", o) end
 function iconbutton(name, onTap, o) o=o or {}; o.icon=name; o.onTap=onTap; return comp("iconbutton", o) end
+-- fab(icon, onTap, { label=, color=, mini= })
+function fab(name, onTap, o) o=o or {}; o.icon=name; o.onTap=onTap; return comp("fab", o) end
 function tile(title, o) o=o or {}; o.title=title; return comp("tile", o) end
 function menu(iconName, items, o) o=o or {}; o.icon=iconName; o.items=items; return comp("menu", o) end
 function toggle(o)   return comp("switch", o) end
 function slider(o)   return comp("slider", o) end
+-- rangeslider({ min=, max=, low=, high=, divisions=, onChanged=fn(lo,hi) })
+function rangeslider(o) return comp("rangeslider", o) end
 function select(o)   return comp("select", o) end
 function textfield(o) return comp("textfield", o) end
 function checkbox(o) return comp("checkbox", o) end
+-- radio({ title=, value=, options={ {label=,value=}, ... }, axis=, onChanged=fn(v) })
+function radio(o)    return comp("radio", o) end
+-- segmented({ value=, options={ {label=,value=,icon=}, ... }, onChanged=fn(v) })
+function segmented(o) return comp("segmented", o) end
+-- togglebuttons({ options={ {label=/icon=}, ... }, selected={1,..}, multi=, onChanged=fn(i,active) })
+function togglebuttons(o) return comp("togglebuttons", o) end
+-- datefield({ label=, value=, onChanged=fn(y,m,d) }) / timefield({ ..., onChanged=fn(h,m) })
+function datefield(o) return comp("datefield", o) end
+function timefield(o) return comp("timefield", o) end
+-- stepper({ active=1, axis=, steps={ {title=,subtitle=,content=<组件>}, ... },
+--           onStep=fn(i), onContinue=fn(i), onCancel=fn(i) })
+function stepper(o)  return comp("stepper", o) end
 
 -- 容器
 function card(title, children, o)
