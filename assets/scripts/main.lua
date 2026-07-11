@@ -1343,6 +1343,25 @@ app.page("gallery", function(ctx)
       datefield({ label = "选择日期", onChanged = function(y,m,d) host.toast(y.."-"..m.."-"..d) end }),
       timefield({ label = "选择时间", onChanged = function(h,m) host.toast(h..":"..m) end }),
     }),
+    card("对话框 (统一模板 + 自定义按钮)", {
+      row({
+        button("确认框", function()
+          host.confirm("确定执行该操作?", function(y) host.toast(y and "已确定" or "已取消") end,
+            { title = "请确认", ok_text = "执行", cancel_text = "算了" })
+        end, { variant = "tonal" }),
+        button("多按钮对话框", function()
+          host.dialog({
+            title = "选择操作",
+            build = function() return text("这是一个自定义对话框, 下方按钮由 Lua 指定。", { color = "grey" }) end,
+            actions = {
+              { label = "取消", variant = "text" },
+              { label = "稍后", variant = "outlined", onTap = function() host.toast("稍后") end },
+              { label = "删除", variant = "filled", danger = true, onTap = function() host.toast("已删除") end },
+            },
+          })
+        end),
+      }, { gap = 8, main = "start" }),
+    }),
   }
 end)
 

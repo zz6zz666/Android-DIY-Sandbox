@@ -5,7 +5,9 @@ const String kLuaPrelude = r'''
 host = {}
 function host.toast(msg) return __host_call("toast", tostring(msg)) end
 function host.log(msg) return __host_call("log", tostring(msg)) end
-function host.confirm(msg, cb) return __host_call("confirm", tostring(msg), cb) end
+-- host.confirm(msg, cb, opts?): opts={ title=, ok_text="确定", cancel_text="取消" }
+function host.confirm(msg, cb, opts) return __host_call("confirm", tostring(msg), cb, opts) end
+-- host.input(opts, cb): opts={ title=, hint=, default=, ok_text=, cancel_text= }
 function host.input(opts, cb) return __host_call("input", opts or {}, cb) end
 function host.exit_app() return __host_call("exit_app") end
 function host.get(key) return __host_call("get_setting", key) end
@@ -40,6 +42,16 @@ host.clipboard = {
   paste = function() return __host_call("clipboard_paste") end,
 }
 host.nav = { go = function(i) return __host_call("nav_go", i) end }
+-- 自定义对话框 (统一模板, 间距固定, 只需关心内容与按钮):
+-- host.dialog({
+--   title = "标题",
+--   build = function() return <组件树> end,   -- 依赖 state() 可响应式重建
+--   actions = {                                -- 省略则默认单个"关闭"
+--     { label="取消", variant="text" },        -- 默认点击后关闭对话框
+--     { label="删除", danger=true, variant="filled", onTap=function() ... end },
+--     -- close=false 可让按钮点击后不关闭对话框
+--   },
+-- })
 function host.dialog(spec) return __host_call("dialog", spec) end
 function host.close_dialog() return __host_call("close_dialog") end
 -- 通用底部动作列表 (可绑定到任意按钮/再次点击等):

@@ -22,7 +22,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '30';
+  static const String _defaultScriptsVersion = '31';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -262,7 +262,8 @@ class ScriptManager {
     e.registerHandler('confirm', (a) {
       final msg = a.isNotEmpty ? '${a[0]}' : '';
       final cb = a.length > 1 && a[1] is LuaFunctionRef ? a[1] as LuaFunctionRef : null;
-      _confirm(msg, cb);
+      final opts = a.length > 2 && a[2] is Map ? a[2] as Map : const {};
+      _confirm(msg, cb, opts);
       return null;
     });
     e.registerHandler('input', (a) {
@@ -525,15 +526,13 @@ class ScriptManager {
           final desc = buildRef.call();
           final content = LuaRenderer(onAction: () => stateRevision.value++)
               .buildRoot(Get.context!, desc);
-          return AlertDialog(
-            title: title == null ? null : Text('$title'),
+          return _styledDialog(
+            title: title == null ? null : '$title',
             content: SizedBox(
               width: 520,
               child: SingleChildScrollView(child: content),
             ),
-            actions: [
-              TextButton(onPressed: () => Get.back(), child: const Text('关闭')),
-            ],
+            actions: _dialogActions(spec['actions']),
           );
         }),
       );
@@ -822,18 +821,91 @@ class ScriptManager {
     Get.rawSnackbar(message: msg, duration: const Duration(seconds: 2));
   }
 
-  Future<void> _confirm(String msg, LuaFunctionRef? cb) async {
+  /// 统一对话框模板: 所有 host.dialog/confirm/input 共用同一间距与外观,
+  /// 保证不同来源的对话框表现一致 (标题/内容/按钮间距固定, Lua 无需关心)。
+  Widget _styledDialog({
+    String? title,
+    required Widget content,
+    required List<Widget> actions,
+  }) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+      contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+      title: title == null ? null : Text('$title'),
+      content: content,
+      actions: actions,
+    );
+  }
+
+  /// 由 Lua 的 actions 规格构造对话框按钮; 为空则默认单个"关闭"。
+  /// 每项: { label=, onTap=fn, variant="text|filled|tonal|outlined", danger=bool, close=bool }
+  List<Widget> _dialogActions(Object? spec) {
+    if (spec is! List || spec.isEmpty) {
+      return [TextButton(onPressed: () => Get.back(), child: const Text('关闭'))];
+    }
+    final ctx = Get.context;
+    final out = <Widget>[];
+    for (final it in spec) {
+      if (it is! Map) continue;
+      final label = '${it['label'] ?? ''}';
+      final danger = it['danger'] == true;
+      final variant = '${it['variant'] ?? 'text'}';
+      final onTap = it['onTap'];
+      void handle() {
+        if (it['close'] != false) {
+          if (Get.isDialogOpen ?? false) Get.back();
+        }
+        if (onTap is LuaFunctionRef) {
+          onTap.call();
+          stateRevision.value++;
+        }
+      }
+
+      final dangerColor = ctx != null ? Theme.of(ctx).colorScheme.error : Colors.red;
+      switch (variant) {
+        case 'filled':
+          out.add(FilledButton(
+            style: danger ? FilledButton.styleFrom(backgroundColor: dangerColor) : null,
+            onPressed: handle,
+            child: Text(label),
+          ));
+          break;
+        case 'tonal':
+          out.add(FilledButton.tonal(onPressed: handle, child: Text(label)));
+          break;
+        case 'outlined':
+          out.add(OutlinedButton(onPressed: handle, child: Text(label)));
+          break;
+        default:
+          out.add(TextButton(
+            style: danger ? TextButton.styleFrom(foregroundColor: dangerColor) : null,
+            onPressed: handle,
+            child: Text(label),
+          ));
+      }
+    }
+    return out;
+  }
+
+  Future<void> _confirm(String msg, LuaFunctionRef? cb, [Map opts = const {}]) async {
     if (Get.context == null) {
       cb?.call([false]);
       cb?.dispose();
       return;
     }
     final ok = await Get.dialog<bool>(
-      AlertDialog(
+      _styledDialog(
+        title: opts['title'] == null ? null : '${opts['title']}',
         content: Text(msg),
         actions: [
-          TextButton(onPressed: () => Get.back(result: false), child: const Text('取消')),
-          TextButton(onPressed: () => Get.back(result: true), child: const Text('确定')),
+          TextButton(
+              onPressed: () => Get.back(result: false),
+              child: Text('${opts['cancel_text'] ?? '取消'}')),
+          TextButton(
+              onPressed: () => Get.back(result: true),
+              child: Text('${opts['ok_text'] ?? '确定'}')),
         ],
       ),
     );
@@ -849,18 +921,20 @@ class ScriptManager {
     }
     final controller = TextEditingController(text: '${opts['default'] ?? ''}');
     final result = await Get.dialog<String?>(
-      AlertDialog(
-        title: Text('${opts['title'] ?? '输入'}'),
+      _styledDialog(
+        title: '${opts['title'] ?? '输入'}',
         content: TextField(
           controller: controller,
           autofocus: true,
           decoration: InputDecoration(hintText: '${opts['hint'] ?? ''}'),
         ),
         actions: [
-          TextButton(onPressed: () => Get.back(result: null), child: const Text('取消')),
+          TextButton(
+              onPressed: () => Get.back(result: null),
+              child: Text('${opts['cancel_text'] ?? '取消'}')),
           TextButton(
               onPressed: () => Get.back(result: controller.text),
-              child: const Text('确定')),
+              child: Text('${opts['ok_text'] ?? '确定'}')),
         ],
       ),
     );

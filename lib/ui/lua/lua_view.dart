@@ -1036,14 +1036,25 @@ class LuaRenderer {
     final variant = '${node['variant'] ?? 'filled'}';
     final danger = node['danger'] == true;
     final iconName = luaIconFor(node['icon']);
-    final label = Text('${node['label'] ?? ''}');
+    // 允许换行时不做省略; 默认单行省略, 避免窄屏 RenderFlex 溢出。
+    final wrapText = node['wrap'] == true;
+    final label = Text(
+      '${node['label'] ?? ''}',
+      textAlign: TextAlign.center,
+      maxLines: wrapText ? null : 1,
+      overflow: wrapText ? null : TextOverflow.ellipsis,
+      softWrap: wrapText,
+    );
     final child = iconName == null
         ? label
-        : Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(iconName, size: 18),
-            const SizedBox(width: 6),
-            label,
-          ]);
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(iconName, size: 18),
+              const SizedBox(width: 6),
+              Flexible(child: label),
+            ],
+          );
     final bg = danger ? Theme.of(context).colorScheme.error : LuaStyle.color(node['color'], context);
     switch (variant) {
       case 'tonal':
