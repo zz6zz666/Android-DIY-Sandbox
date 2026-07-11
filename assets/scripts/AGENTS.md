@@ -68,18 +68,17 @@ reply.set(reply.get() .. token)       -- 每次只重绘这一个 Text
 
 导航栏由 `nav.tabs` 定义。每个 tab 的 `page` 有四种取值:
 
-| page 取值 | 页面类型 |
-|-----------|----------|
-| `"home"` | 内置主页(唯一带固定齿轮设置入口) |
-| `terminal()` | 内置终端页 |
-| `webview(url)` | 内嵌网页 |
-| `"任意页面名"` | 用 `app.page` 注册的自定义页面(设置页、游戏页、AI 应用页…) |
+| page 取值        | 页面类型                                                     |
+| ---------------- | ------------------------------------------------------------ |
+| `"home"`       | 内置主页(唯一带固定齿轮设置入口)                             |
+| `terminal()`   | 内置终端页                                                   |
+| `webview()`    | 内嵌网页标签(默认空白;用 `host.webview_open(url, title)` 打开具体网页) |
+| `"任意页面名"` | 用`app.page` 注册的自定义页面(设置页、游戏页、AI 应用页…) |
 
 ```lua
 nav.tabs({
   { title = "主页",  icon = "home_outlined", page = "home" },
-  { title = "组件",  icon = "widgets",       page = "gallery" },
-  { title = "WebUI", icon = "language",      page = webview("http://127.0.0.1:6185") },
+  { title = "WebUI", icon = "language",      page = webview() },
   { title = "终端",  icon = "terminal",      page = terminal() },
 })
 ```
@@ -149,26 +148,26 @@ app.actions({
 
 ### 布局
 
-| 构造 | 说明 |
-|------|------|
-| `column(children, {main,cross,gap,expand})` | 纵向。main/cross:`start/end/center/stretch/spaceBetween/spaceAround/spaceEvenly` |
-| `row(children, {main,cross,gap,expand})` | 横向 |
-| `stack(children)` | 层叠(配合 `positioned`) |
-| `wrap(children, {spacing,runSpacing})` | 自动换行流式 |
-| `grid(children, {columns,gap,ratio,padding,scroll})` | 网格。`scroll=true` 时虚拟化(仅建可视项) |
-| `list(children, {axis,separator,padding,scroll})` | 列表。`scroll=true` 时虚拟化;每项可带 `key` 字段助复用 |
-| `datatable({headers, rows})` | 数据表 |
-| `padding(child, pad)` · `align(child, a)` · `center(child)` | 内边距 / 对齐 / 居中 |
-| `expanded(child, flex)` · `flexible(child, {flex,tight})` | 在 row/column 中占据/弹性空间 |
-| `spacer(size?)` | 间隔(省略则弹性) |
-| `box({width,height,child})` | 定尺寸盒子 |
-| `scroll(children, {axis})` | 滚动容器 |
-| `positioned(child, {left,top,right,bottom,width,height})` | 在 stack 中定位 |
-| `aspect(child, ratio)` · `fitted(child, fit)` | 宽高比 / 缩放适配 |
-| `clip(child, {shape,radius})` · `safearea(child)` | 裁剪 / 安全区 |
-| `gesture(child, {onTap,onLongPress,onDoubleTap})` | 手势区域 |
-| `inkwell(child, {onTap,radius})` | 水波纹点击区 |
-| `tooltip(child, msg)` | 长按提示 |
+| 构造                                                                | 说明                                                                               |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `column(children, {main,cross,gap,expand})`                       | 纵向。main/cross:`start/end/center/stretch/spaceBetween/spaceAround/spaceEvenly` |
+| `row(children, {main,cross,gap,expand})`                          | 横向                                                                               |
+| `stack(children)`                                                 | 层叠(配合`positioned`)                                                           |
+| `wrap(children, {spacing,runSpacing})`                            | 自动换行流式                                                                       |
+| `grid(children, {columns,gap,ratio,padding,scroll})`              | 网格。`scroll=true` 时虚拟化(仅建可视项)                                         |
+| `list(children, {axis,separator,padding,scroll})`                 | 列表。`scroll=true` 时虚拟化;每项可带 `key` 字段助复用                         |
+| `datatable({headers, rows})`                                      | 数据表                                                                             |
+| `padding(child, pad)` · `align(child, a)` · `center(child)` | 内边距 / 对齐 / 居中                                                               |
+| `expanded(child, flex)` · `flexible(child, {flex,tight})`      | 在 row/column 中占据/弹性空间                                                      |
+| `spacer(size?)`                                                   | 间隔(省略则弹性)                                                                   |
+| `box({width,height,child})`                                       | 定尺寸盒子                                                                         |
+| `scroll(children, {axis})`                                        | 滚动容器                                                                           |
+| `positioned(child, {left,top,right,bottom,width,height})`         | 在 stack 中定位                                                                    |
+| `aspect(child, ratio)` · `fitted(child, fit)`                  | 宽高比 / 缩放适配                                                                  |
+| `clip(child, {shape,radius})` · `safearea(child)`              | 裁剪 / 安全区                                                                      |
+| `gesture(child, {onTap,onLongPress,onDoubleTap})`                 | 手势区域                                                                           |
+| `inkwell(child, {onTap,radius})`                                  | 水波纹点击区                                                                       |
+| `tooltip(child, msg)`                                             | 长按提示                                                                           |
 
 > **大列表虚拟化**:聊天记录/信息流等超长列表,务必用 `list(items, {scroll=true})`,只构建可视项,
 > 千/万项也流畅;通常放进有界高度容器(如 `box({height=300, child=list(...)})`)。
@@ -176,47 +175,47 @@ app.actions({
 
 ### 内容
 
-| 构造 | 说明 |
-|------|------|
-| `text(s, {size,weight,color,align,maxLines,ellipsis,bind})` | 文本。`bind="reactiveKey"` 时内容跟随 `reactive(key)` 实时刷新(流式,只重绘本组件) |
-| `richtext({ {text,color,weight,size,italic,underline}, ... }, {align})` | 富文本(多段) |
-| `icon(name, {size,color})` | 图标(见[图标](#四图标)) |
-| `avatar({image,icon,text,radius,color})` | 头像 |
-| `image(path, {width,height})` | 本地路径或 `http(s)` 图片 |
-| `spinner({size,value,color})` | 环形加载 |
-| `progress(value, {color,track})` | 线形进度(0..1,nil 为不确定) |
-| `chip(label, {color})` · `badge(child, {label,color})` | 标签 / 角标 |
-| `divider(...)` · `vdivider(...)` | 横 / 竖分隔线 |
+| 构造                                                                      | 说明                                                                                  |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `text(s, {size,weight,color,align,maxLines,ellipsis,bind})`             | 文本。`bind="reactiveKey"` 时内容跟随 `reactive(key)` 实时刷新(流式,只重绘本组件) |
+| `richtext({ {text,color,weight,size,italic,underline}, ... }, {align})` | 富文本(多段)                                                                          |
+| `icon(name, {size,color})`                                              | 图标(见[图标](#四图标))                                                                |
+| `avatar({image,icon,text,radius,color})`                                | 头像                                                                                  |
+| `image(path, {width,height})`                                           | 本地路径或`http(s)` 图片                                                            |
+| `spinner({size,value,color})`                                           | 环形加载                                                                              |
+| `progress(value, {color,track})`                                        | 线形进度(0..1,nil 为不确定)                                                           |
+| `chip(label, {color})` · `badge(child, {label,color})`               | 标签 / 角标                                                                           |
+| `divider(...)` · `vdivider(...)`                                     | 横 / 竖分隔线                                                                         |
 
 ### 交互
 
-| 构造 | 说明 |
-|------|------|
-| `button(label, onTap, {variant,icon,color,danger})` | variant:`filled/tonal/outlined/text` |
-| `iconbutton(name, onTap, {tooltip,color})` | 图标按钮 |
-| `fab(icon, onTap, {label,color,mini})` | 浮动按钮 |
-| `tile(title, {subtitle,icon,trailing,onTap})` | 列表项 |
-| `menu(iconName, items)` | 弹出菜单;items:`{{label,onTap,enabled},...}` |
-| `toggle({title,value,onChanged})` | 开关 |
-| `checkbox({title,value,onChanged})` | 复选 |
-| `radio({title,value,options,axis,onChanged})` | 单选组;`onChanged(v)` |
-| `slider({value,min,max,onChanged})` | 滑块 |
-| `rangeslider({min,max,low,high,onChanged})` | 区间滑块;`onChanged(lo,hi)` |
-| `select({title,value,options,onChanged})` | 下拉;options:`{{label,value},...}` |
-| `segmented({value,options,onChanged})` | 分段单选 |
-| `togglebuttons({options,selected,multi,onChanged})` | 切换按钮组 |
-| `textfield({label,hint,value,onChanged})` | 输入框 |
-| `datefield({label,onChanged})` · `timefield({label,onChanged})` | 日期 / 时间选择 |
-| `stepper({active,steps,onStep,onContinue,onCancel})` | 步进器 |
+| 构造                                                                 | 说明                                           |
+| -------------------------------------------------------------------- | ---------------------------------------------- |
+| `button(label, onTap, {variant,icon,color,danger})`                | variant:`filled/tonal/outlined/text`         |
+| `iconbutton(name, onTap, {tooltip,color})`                         | 图标按钮                                       |
+| `fab(icon, onTap, {label,color,mini})`                             | 浮动按钮                                       |
+| `tile(title, {subtitle,icon,trailing,onTap})`                      | 列表项                                         |
+| `menu(iconName, items)`                                            | 弹出菜单;items:`{{label,onTap,enabled},...}` |
+| `toggle({title,value,onChanged})`                                  | 开关                                           |
+| `checkbox({title,value,onChanged})`                                | 复选                                           |
+| `radio({title,value,options,axis,onChanged})`                      | 单选组;`onChanged(v)`                        |
+| `slider({value,min,max,onChanged})`                                | 滑块                                           |
+| `rangeslider({min,max,low,high,onChanged})`                        | 区间滑块;`onChanged(lo,hi)`                  |
+| `select({title,value,options,onChanged})`                          | 下拉;options:`{{label,value},...}`           |
+| `segmented({value,options,onChanged})`                             | 分段单选                                       |
+| `togglebuttons({options,selected,multi,onChanged})`                | 切换按钮组                                     |
+| `textfield({label,hint,value,onChanged})`                          | 输入框                                         |
+| `datefield({label,onChanged})` · `timefield({label,onChanged})` | 日期 / 时间选择                                |
+| `stepper({active,steps,onStep,onContinue,onCancel})`               | 步进器                                         |
 
 ### 容器
 
-| 构造 | 说明 |
-|------|------|
-| `card(title, children)` / `card(children)` | 毛玻璃卡片 |
-| `section(title, children)` | 带标题分组 |
-| `expansion(title, children, {icon})` | 可展开面板 |
-| `tabs({...})` | 页内多标签(见[第一部分](#页内多标签)) |
+| 构造                                           | 说明                                 |
+| ---------------------------------------------- | ------------------------------------ |
+| `card(title, children)` / `card(children)` | 毛玻璃卡片                           |
+| `section(title, children)`                   | 带标题分组                           |
+| `expansion(title, children, {icon})`         | 可展开面板                           |
+| `tabs({...})`                                | 页内多标签(见[第一部分](#页内多标签)) |
 
 ---
 
@@ -224,15 +223,15 @@ app.actions({
 
 任意组件传 `style = { ... }`:
 
-| 属性 | 取值 |
-|------|------|
-| `width`/`height`/`minWidth`/`maxWidth`/`minHeight`/`maxHeight` | 尺寸与约束 |
-| `padding`/`margin` | edge 格式 |
-| `bg`/`border`/`color`/`borderWidth`/`radius`/`opacity` | 背景/边框/圆角/透明度 |
-| `align` | `topLeft … center … bottomRight` |
-| `aspectRatio`/`rotate`/`scale` | 宽高比 / 旋转弧度 / 缩放 |
-| `shadow` | `true` 或 `{color,blur,dx,dy,spread}` |
-| `gradient` | `{type="linear"/"radial", colors={...}, begin, end}` |
+| 属性                                                                       | 取值                                                   |
+| -------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `width`/`height`/`minWidth`/`maxWidth`/`minHeight`/`maxHeight` | 尺寸与约束                                             |
+| `padding`/`margin`                                                     | edge 格式                                              |
+| `bg`/`border`/`color`/`borderWidth`/`radius`/`opacity`         | 背景/边框/圆角/透明度                                  |
+| `align`                                                                  | `topLeft … center … bottomRight`                   |
+| `aspectRatio`/`rotate`/`scale`                                       | 宽高比 / 旋转弧度 / 缩放                               |
+| `shadow`                                                                 | `true` 或 `{color,blur,dx,dy,spread}`              |
+| `gradient`                                                               | `{type="linear"/"radial", colors={...}, begin, end}` |
 
 **颜色**:`"#RRGGBB"`/`"#AARRGGBB"` · 主题色 `primary/secondary/error/surface/...` ·
 Material 色板 `red/blue/teal/...`(带明度 `"blue.700"`,强调色 `blueAccent`)· `white/black/transparent/...` ·
@@ -266,13 +265,13 @@ icon(0xe88a)            -- 也可直接用 codepoint
 love{ id = 0, game = SCRIPTS.."/games/demo" }
 ```
 
-| 属性 | 说明 |
-|------|------|
-| `id` | 画布标识 **0..3,必须唯一**。每个 id 是一块独立实例(独立进程),同屏多块须各用不同 id |
-| `game` | love2d 工程目录绝对路径(内含 `main.lua`) |
-| `width`/`height` | 尺寸;作为普通元素时 height 默认 200 |
-| `autopause` | 默认 `true`:切走导航页时自动挂起(停渲染、留内存、不丢状态) |
-| `onEvent` | `function(msg)`:收到游戏发来的消息(表)时回调(见下「双向通信」) |
+| 属性                 | 说明                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `id`               | 画布标识**0..3,必须唯一**。每个 id 是一块独立实例(独立进程),同屏多块须各用不同 id |
+| `game`             | love2d 工程目录绝对路径(内含`main.lua`)                                               |
+| `width`/`height` | 尺寸;作为普通元素时 height 默认 200                                                     |
+| `autopause`        | 默认`true`:切走导航页时自动挂起(停渲染、留内存、不丢状态)                             |
+| `onEvent`          | `function(msg)`:收到游戏发来的消息(表)时回调(见下「双向通信」)                        |
 
 `game` 指向一个标准 love2d 工程,`main.lua` 里实现 love 回调(触摸已从 Flutter 转发):
 
@@ -313,7 +312,7 @@ host.connected()                                     -- 是否已连上 UI
 
 ### 两种典型用法
 
-**① 小游戏 → 全画布**(推荐)。把 love 作为整页(或某标签页)里**唯一**的元素,自然最大化;配多标签做游戏合集:
+**① 小游戏 → 全画布**。把 love 作为整页(或某标签页)里**唯一**的元素,自然最大化;配多标签做游戏合集:
 
 ```lua
 app.page("games", function()
@@ -401,19 +400,19 @@ ws:close()
 
 面向 AI、云端 API 的原生能力。`data` 可为字符串(UTF-8)或字节数组。
 
-| API | 说明 |
-|-----|------|
-| `host.base64_encode(data)` / `host.base64_decode(s, as_bytes?)` | Base64 |
-| `host.hex_encode(data)` / `host.hex_decode(s, as_bytes?)` | Hex |
-| `host.url_encode(s, component?)` / `host.url_decode(s)` | URL 编码 |
-| `host.hash(algo, data, b64?)` | `md5/sha1/sha256/sha512`,默认 hex 输出 |
-| `host.hmac(algo, key, data, b64?)` | HMAC(云 API 签名刚需) |
-| `host.md5/sha1/sha256/sha512(data, b64?)` | 便捷别名 |
-| `host.hmac_sha256(key, data, b64?)` / `host.hmac_sha1(...)` | 便捷别名 |
-| `host.random_bytes(n, fmt?)` | 随机字节;fmt:`hex`(默认)/`b64`/`raw` |
-| `host.uuid()` | UUID v4 |
-| `host.interval(ms, cb)` → id / `host.clear_interval(id)` | 重复定时器 |
-| `host.device_info()` | `{platform,osVersion,locale,screenW,screenH,dpr,darkMode, appVersion,model,brand,sdkInt,...}` |
+| API                                                                 | 说明                                                                                            |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `host.base64_encode(data)` / `host.base64_decode(s, as_bytes?)` | Base64                                                                                          |
+| `host.hex_encode(data)` / `host.hex_decode(s, as_bytes?)`       | Hex                                                                                             |
+| `host.url_encode(s, component?)` / `host.url_decode(s)`         | URL 编码                                                                                        |
+| `host.hash(algo, data, b64?)`                                     | `md5/sha1/sha256/sha512`,默认 hex 输出                                                        |
+| `host.hmac(algo, key, data, b64?)`                                | HMAC(云 API 签名刚需)                                                                           |
+| `host.md5/sha1/sha256/sha512(data, b64?)`                         | 便捷别名                                                                                        |
+| `host.hmac_sha256(key, data, b64?)` / `host.hmac_sha1(...)`     | 便捷别名                                                                                        |
+| `host.random_bytes(n, fmt?)`                                      | 随机字节;fmt:`hex`(默认)/`b64`/`raw`                                                      |
+| `host.uuid()`                                                     | UUID v4                                                                                         |
+| `host.interval(ms, cb)` → id / `host.clear_interval(id)`       | 重复定时器                                                                                      |
+| `host.device_info()`                                              | `{platform,osVersion,locale,screenW,screenH,dpr,darkMode, appVersion,model,brand,sdkInt,...}` |
 
 > 时间/随机也可直接用 Lua 标准库:`os.time()`、`os.date("%Y-%m-%d")`、`math.random()`。
 
@@ -471,24 +470,25 @@ host.sheet({ title="更多", items = {
 
 ## 十、文件 / 存储 / 进程
 
-| API | 说明 |
-|-----|------|
-| `host.get(key)` / `host.set(key, val)` | 持久化设置键值(set 触发重建) |
-| `host.read_file(p)` / `host.write_file(p, s)` | 读写文本 |
-| `host.read_bytes(p)`→base64 / `host.write_bytes(p, base64)` | 读写二进制(存 AI 图片/音频) |
-| `host.exists(p)` / `host.delete_file(p)` / `host.delete_dir(p)` | 文件操作 |
-| `host.list_dir(p)` → `{{name,path,isDir},...}` / `host.mkdirs(p)` | 目录 |
-| `host.home_path()` / `host.ubuntu_path()` / `host.bin_path()` / `host.tmp_path()` / `host.backup_dir()` | 常用路径 |
-| `host.clipboard.copy(s)` / `host.clipboard.paste()` | 剪贴板 |
-| `host.open_url(url)` / `host.exit_app()` | 外链 / 退出 |
-| `host.exec(cmd, cb)` | 容器内执行并取回 `cb({code,output})` |
-| `host.container(cmd, cb)` | 容器内执行(不取输出) |
-| `host.spawn(cmd, title, key, cb)` | 容器内跑长命令,流式输出到终端 tab;`key` 跟踪运行态 |
-| `host.stop(key)` | 停止某 spawn |
-| `host.run(program, args, cb)` | 宿主层进程 `cb({code,stdout,stderr})` |
-| `host.free_port(start, stop, exclude, cb)` | 找空闲端口 `cb(port\|nil)` |
-| `host.delay(ms, cb)` | 单次延时回调 |
-| `host.log/warn/error(msg)` | 写入 App 内日志控制台(设置页顶栏「Lua 日志」);`print(...)` 亦重定向到此 |
+| API                                                                                                               | 说明                                                                      |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `host.get(key)` / `host.set(key, val)`                                                                        | 持久化设置键值(set 触发重建)                                              |
+| `host.read_file(p)` / `host.write_file(p, s)`                                                                 | 读写文本                                                                  |
+| `host.read_bytes(p)`→base64 / `host.write_bytes(p, base64)`                                                  | 读写二进制(存 AI 图片/音频)                                               |
+| `host.exists(p)` / `host.delete_file(p)` / `host.delete_dir(p)`                                             | 文件操作                                                                  |
+| `host.list_dir(p)` → `{{name,path,isDir},...}` / `host.mkdirs(p)`                                          | 目录                                                                      |
+| `host.home_path()` / `host.ubuntu_path()` / `host.bin_path()` / `host.tmp_path()` / `host.backup_dir()` | 常用路径                                                                  |
+| `host.clipboard.copy(s)` / `host.clipboard.paste()`                                                           | 剪贴板                                                                    |
+| `host.open_url(url)` / `host.exit_app()`                                                                      | 外链 / 退出                                                               |
+| `host.webview_open(url, title?)`                                                                                | 在内嵌 WebUI 标签打开一个网页                                              |
+| `host.exec(cmd, cb)`                                                                                            | 容器内执行并取回`cb({code,output})`                                     |
+| `host.container(cmd, cb)`                                                                                       | 容器内执行(不取输出)                                                      |
+| `host.spawn(cmd, title, key, cb)`                                                                               | 容器内跑长命令,流式输出到终端 tab;`key` 跟踪运行态                      |
+| `host.stop(key)`                                                                                                | 停止某 spawn                                                              |
+| `host.run(program, args, cb)`                                                                                   | 宿主层进程`cb({code,stdout,stderr})`                                    |
+| `host.free_port(start, stop, exclude, cb)`                                                                      | 找空闲端口`cb(port\|nil)`                                                |
+| `host.delay(ms, cb)`                                                                                            | 单次延时回调                                                              |
+| `host.log/warn/error(msg)`                                                                                      | 写入 App 内日志控制台(设置页顶栏「Lua 日志」);`print(...)` 亦重定向到此 |
 
 > **把容器命令绑到按钮**:`button("启动服务", function() host.spawn("cd /root/app && python run.py", "服务", "svc") end)`,
 > 再用 `ctx.running["svc"]` 显示运行态、`host.stop("svc")` 停止。

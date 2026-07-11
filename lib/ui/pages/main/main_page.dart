@@ -185,12 +185,12 @@ class _MainPageState extends State<MainPage> {
               actions: [
                 IconButton(
                   tooltip: '导入脚本 (zip)',
-                  icon: const Icon(Icons.file_upload_outlined),
+                  icon: const Icon(Icons.file_download_outlined),
                   onPressed: _importScripts,
                 ),
                 IconButton(
                   tooltip: '导出脚本 (zip)',
-                  icon: const Icon(Icons.file_download_outlined),
+                  icon: const Icon(Icons.file_upload_outlined),
                   onPressed: _exportScripts,
                 ),
                 IconButton(
