@@ -18,9 +18,9 @@ function ports.set(name, v) host.set(ports.key[name], v) end
 
 nav.tabs({
   { title = "主页",  icon = "home_outlined",     page = "home" },
-  { title = "组件",  icon = "widgets",  page = "gallery" },
-  { title = "WebUI", icon = "language", page = webview("http://127.0.0.1:" .. ports.get("dashboard")) },
+  { title = "WebUI", icon = "language", page = webview() },
   { title = "终端",  icon = "terminal", page = terminal() },
+  { title = "游戏",  icon = "sports_esports",  page = "game_full" },
 })
 
 -- GitHub 代理选项
@@ -1232,137 +1232,29 @@ end
 app.page("home", function(ctx)
   return {
     quick_start_card(ctx),
-    -- 双画布: 左边演示动画, 右边触摸小跑酷
-    row({
-      expanded(love{ id = 0, height = 200, game = SCRIPTS.."/games/demo" }),
-      spacer(8),
-      expanded(love{ id = 1, height = 240, game = SCRIPTS.."/games/runner" }),
-    }, { crossAxis = "center" }),
     napcat_card(ctx),
     env_card(),
     manage_section(),
+    -- 底部横条跑酷示例 (love 画布作为普通 UI 元素, 随主页一起滚动)
+    love{ id = 0, height = 180, game = SCRIPTS.."/games/runner" },
   }
 end)
 
 -- ============================================================
--- 组件画廊: 演示扩展后的全量图标与新组件 (验证 Lua UI 与原生拉齐)
+-- 游戏页: 整页 love 画布 + 多标签切换 (每块画布唯一 id)
 -- ============================================================
-app.page("gallery", function(ctx)
-  local seg = state("g_seg", "a")
-  local rad = state("g_rad", 2)
-  local rng_lo = state("g_lo", 20)
-  local rng_hi = state("g_hi", 70)
-  return {
-    card("任意图标 (全量 Material)", {
-      wrap({
-        icon("rocket_launch", { size = 30, color = "deepPurple" }),
-        icon("favorite", { size = 30, color = "pink.400" }),
-        icon("thunderstorm", { size = 30, color = "blue.700" }),
-        icon("emoji_emotions", { size = 30, color = "amber" }),
-        icon("pets", { size = 30, color = "brown" }),
-        icon("bakery_dining", { size = 30, color = "orange" }),
-        icon("sports_esports", { size = 30, color = "teal" }),
-        icon("diamond", { size = 30, color = "cyan" }),
-      }, { spacing = 14, runSpacing = 10 }),
-    }),
-    card("按钮 / FAB", {
-      row({
-        button("Filled", function() host.toast("filled") end),
-        button("Tonal", function() end, { variant = "tonal" }),
-        button("Outlined", function() end, { variant = "outlined" }),
-      }, { gap = 8, main = "start" }),
-      spacer(8),
-      row({
-        fab("add", function() host.toast("fab") end, { mini = true }),
-        spacer(12),
-        fab("navigation", function() end, { label = "导航", color = "indigo" }),
-      }, { main = "start", cross = "center" }),
-    }),
-    card("分段 / 单选 / 开关", {
-      segmented({
-        value = seg.get(),
-        options = {
-          { label = "日", value = "a", icon = "wb_sunny" },
-          { label = "周", value = "b", icon = "calendar_view_week" },
-          { label = "月", value = "c", icon = "calendar_month" },
-        },
-        onChanged = function(v) seg.set(v) end,
-      }),
-      radio({
-        title = "优先级",
-        value = rad.get(),
-        axis = "horizontal",
-        options = {
-          { label = "低", value = 1 },
-          { label = "中", value = 2 },
-          { label = "高", value = 3 },
-        },
-        onChanged = function(v) rad.set(v) end,
-      }),
-      toggle({ title = "启用通知", value = true, onChanged = function(v) host.toast(tostring(v)) end }),
-    }),
-    card("区间滑块 / 头像 / 进度", {
-      rangeslider({
-        min = 0, max = 100, low = rng_lo.get(), high = rng_hi.get(),
-        divisions = 20,
-        onChanged = function(lo, hi) rng_lo.set(lo); rng_hi.set(hi) end,
-      }),
-      text(string.format("范围: %d - %d", rng_lo.get(), rng_hi.get()), { color = "grey" }),
-      spacer(8),
-      row({
-        avatar({ icon = "person", radius = 22, color = "blue" }),
-        avatar({ text = "AI", radius = 22, color = "deepPurple" }),
-        avatar({ icon = "smart_toy", radius = 22, color = "teal" }),
-      }, { gap = 12, main = "start" }),
-      spacer(10),
-      progress(0.65, { color = "green" }),
-    }),
-    card("网格布局", {
-      grid({
-        box({ height = 60, child = center(icon("looks_one", { size = 30, color = "white" })),
-          style = { bg = "red", radius = 10 } }),
-        box({ height = 60, child = center(icon("looks_two", { size = 30, color = "white" })),
-          style = { bg = "green", radius = 10 } }),
-        box({ height = 60, child = center(icon("looks_3", { size = 30, color = "white" })),
-          style = { bg = "blue", radius = 10 } }),
-        box({ height = 60, child = center(icon("looks_4", { size = 30, color = "white" })),
-          style = { bg = "orange", radius = 10 } }),
-      }, { columns = 4, gap = 8, ratio = 1 }),
-    }),
-    card("渐变 / 阴影 / 变换", {
-      row({
-        box({ width = 70, height = 70, child = center(text("渐变", { color = "white" })),
-          style = { gradient = { colors = {"purple", "blue"} }, radius = 12 } }),
-        box({ width = 70, height = 70, child = center(icon("bolt", { color = "white" })),
-          style = { bg = "orange", radius = 12, shadow = true } }),
-        box({ width = 70, height = 70, child = center(icon("star", { color = "amber" })),
-          style = { bg = "#222222", radius = 12, rotate = 0.2 } }),
-      }, { gap = 12, main = "start" }),
-    }),
-    card("日期 / 时间", {
-      datefield({ label = "选择日期", onChanged = function(y,m,d) host.toast(y.."-"..m.."-"..d) end }),
-      timefield({ label = "选择时间", onChanged = function(h,m) host.toast(h..":"..m) end }),
-    }),
-    card("对话框 (统一模板 + 自定义按钮)", {
-      row({
-        button("确认框", function()
-          host.confirm("确定执行该操作?", function(y) host.toast(y and "已确定" or "已取消") end,
-            { title = "请确认", ok_text = "执行", cancel_text = "算了" })
-        end, { variant = "tonal" }),
-        button("多按钮对话框", function()
-          host.dialog({
-            title = "选择操作",
-            build = function() return text("这是一个自定义对话框, 下方按钮由 Lua 指定。", { color = "grey" }) end,
-            actions = {
-              { label = "取消", variant = "text" },
-              { label = "稍后", variant = "outlined", onTap = function() host.toast("稍后") end },
-              { label = "删除", variant = "filled", danger = true, onTap = function() host.toast("已删除") end },
-            },
-          })
-        end),
-      }, { gap = 8, main = "start" }),
-    }),
-  }
+app.page("game_full", function()
+  local tab = state("game.tab", 1)
+  return tabs({
+    active = tab.get(),
+    onSelect = function(i) tab.set(i) end,
+    items = {
+      { title = "旋转三角", icon = "change_history", content =
+        love{ id = 2, game = SCRIPTS.."/games/demo" } },
+      { title = "跑酷", icon = "directions_run", content =
+        love{ id = 3, game = SCRIPTS.."/games/runner" } },
+    },
+  })
 end)
 
 -- 主页顶栏自定义按钮 (设置按钮左侧): DIY = 启动 opencode 引擎并打开 WebUI

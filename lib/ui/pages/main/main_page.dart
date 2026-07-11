@@ -10,6 +10,7 @@ import '../settings/settings_page.dart';
 import '../terminal/terminal_tab_view.dart';
 import '../webview/webview_tab_view.dart';
 import '../love/love_game_view.dart';
+import '../logs/lua_log_page.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -25,12 +26,15 @@ class _MainPageState extends State<MainPage> {
   int _currentIndex = 0;
   bool _showSettings = false;
 
-  /// 由 Lua 脚本定义的导航 tab; 为空时回退到单个主页。
+  /// 由 Lua 脚本定义的导航 tab; 为空(main.lua 缺失/损坏)时回退到内置三页:
+  /// 主页(空白) / WebUI(空) / 终端 —— 保证脚本挂掉也能进终端与设置自救。
   List<Map<String, dynamic>> get _tabs {
     final t = ScriptManager.instance.navTabs;
     if (t.isEmpty) {
       return [
         {'title': '主页', 'icon': 'home', 'page': 'home'},
+        {'title': 'WebUI', 'icon': 'language', 'page': {'type': 'webview'}},
+        {'title': '终端', 'icon': 'terminal', 'page': 'terminal'},
       ];
     }
     return t;
@@ -131,6 +135,15 @@ class _MainPageState extends State<MainPage> {
                 icon: const Icon(Icons.arrow_back),
                 onPressed: _closeSettings,
               ),
+              actions: [
+                IconButton(
+                  tooltip: 'Lua 日志',
+                  icon: const Icon(Icons.article_outlined),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LuaLogPage()),
+                  ),
+                ),
+              ],
             ),
             Expanded(
               child: SettingsPage(),

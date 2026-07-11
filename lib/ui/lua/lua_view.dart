@@ -443,16 +443,9 @@ class _LuaPageState extends State<LuaPage> {
   }
 
   Widget _missing(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(
-          '页面 "${widget.pageName}" 未在脚本中注册\n${ScriptManager.instance.lastError ?? ''}',
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.redAccent),
-        ),
-      ),
-    );
+    // 页面未注册 (如 main.lua 缺失/损坏时的主页): 留空白。
+    // 加载失败的具体原因通过 toast + 设置页呈现, 不在页面上堆红字。
+    return const SizedBox.shrink();
   }
 }
 
@@ -1186,9 +1179,24 @@ class LuaRenderer {
       trailing.add(build(context, trailingSpec));
     }
 
+    // 所有标签内容都挂载 (IndexedStack), 用 LovePageActive 标记当前可见标签。
+    // 与多导航页完全同等: 非激活标签内的 love 暂停渲染但保留状态与纹理,
+    // 激活标签恢复渲染。love 复用同一 State 会导致纹理串台, 故必须保持各自挂载。
+    // 标签可见性还需叠加父级(导航页)可见性: 导航页隐藏时, 本页所有标签的 love 都应暂停。
+    final parentActive = LovePageActive.of(context);
     final Widget content = count == 0
         ? Center(child: Text('${node['empty'] ?? ''}'))
-        : build(context, (items[active] as Map)['content']);
+        : IndexedStack(
+            index: active,
+            sizing: StackFit.expand,
+            children: [
+              for (var i = 0; i < count; i++)
+                LovePageActive(
+                  active: parentActive && i == active,
+                  child: build(context, (items[i] as Map)['content']),
+                ),
+            ],
+          );
 
     return Column(
       children: [

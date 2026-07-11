@@ -20,6 +20,7 @@ import '../constants/scripts.dart' show ubuntuPath;
 import '../../ui/controllers/terminal_controller.dart';
 import '../../ui/lua/lua_view.dart';
 import 'lua_engine.dart';
+import 'lua_log.dart';
 import 'lua_prelude.dart';
 
 /// Lua 脚本运行时管理器: 加载/执行脚本, 注册 host 能力, 维护页面与导航注册表。
@@ -28,7 +29,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '35';
+  static const String _defaultScriptsVersion = '50';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -258,7 +259,15 @@ class ScriptManager {
     });
 
     e.registerHandler('log', (a) {
-      debugPrint('[Lua] ${a.isNotEmpty ? a[0] : ''}');
+      LuaLog.instance.info(a.isNotEmpty ? a[0] : '');
+      return null;
+    });
+    e.registerHandler('warn', (a) {
+      LuaLog.instance.warn(a.isNotEmpty ? a[0] : '');
+      return null;
+    });
+    e.registerHandler('logerror', (a) {
+      LuaLog.instance.error(a.isNotEmpty ? a[0] : '');
       return null;
     });
     e.registerHandler('toast', (a) {

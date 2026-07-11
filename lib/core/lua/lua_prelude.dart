@@ -5,6 +5,14 @@ const String kLuaPrelude = r'''
 host = {}
 function host.toast(msg) return __host_call("toast", tostring(msg)) end
 function host.log(msg) return __host_call("log", tostring(msg)) end
+function host.warn(msg) return __host_call("warn", tostring(msg)) end
+function host.error(msg) return __host_call("logerror", tostring(msg)) end
+-- 重定向 print 到 app 内日志 (方便手机端调试; 多参以 tab 分隔)
+function print(...)
+  local t = {...}
+  for i = 1, #t do t[i] = tostring(t[i]) end
+  return __host_call("log", table.concat(t, "\t"))
+end
 -- host.confirm(msg, cb, opts?): opts={ title=, ok_text="确定", cancel_text="取消" }
 function host.confirm(msg, cb, opts) return __host_call("confirm", tostring(msg), cb, opts) end
 -- host.input(opts, cb): opts={ title=, hint=, default=, ok_text=, cancel_text= }

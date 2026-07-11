@@ -2,6 +2,7 @@ import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 
+import 'lua_log.dart';
 import 'luajit_bindings.dart';
 
 class LuaError implements Exception {
@@ -90,6 +91,7 @@ class LuaEngine {
       final handler = _handlers[name];
       if (handler == null) {
         debugPrint('[Lua] 未注册的 host 调用: $name');
+        LuaLog.instance.warn('未注册的 host 调用: $name');
         _lua.luaPushNil(l);
         return 1;
       }
@@ -98,6 +100,7 @@ class LuaEngine {
       return 1;
     } catch (e, st) {
       debugPrint('[Lua] host 调用异常: $e\n$st');
+      LuaLog.instance.error('host 调用异常: $e');
       _lua.luaPushNil(l);
       return 1;
     }
@@ -219,6 +222,7 @@ class LuaEngine {
       final err = _lua.luaToDartString(_l, -1) ?? '未知错误';
       _lua.luaSetTop(_l, top0);
       debugPrint('[Lua] 回调执行失败: $err');
+      LuaLog.instance.error('回调执行失败: $err');
       return null;
     }
     final result = readValue(-1);
@@ -240,6 +244,7 @@ class LuaEngine {
       if (loadRc != 0) {
         final err = _lua.luaToDartString(_l, -1) ?? '未知语法错误';
         _lua.luaPop(_l, 1);
+        LuaLog.instance.error('加载失败($chunkName): $err');
         throw LuaError('加载失败($chunkName): $err');
       }
       final top0 = _lua.luaGetTop(_l) - 1; // 减去已压入的 chunk 函数
@@ -247,6 +252,7 @@ class LuaEngine {
       if (callRc != 0) {
         final err = _lua.luaToDartString(_l, -1) ?? '未知运行错误';
         _lua.luaPop(_l, 1);
+        LuaLog.instance.error('运行失败($chunkName): $err');
         throw LuaError('运行失败($chunkName): $err');
       }
       final result = readValue(-1);
