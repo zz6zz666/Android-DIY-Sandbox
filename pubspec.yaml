@@ -59,6 +59,13 @@ flutter:
   assets:
     - assets/
     - assets/scripts/
+    - assets/scripts/games/
+    - assets/scripts/games/demo/
+    - assets/scripts/games/runner/
+    - assets/scripts/agent.lua
+    - assets/scripts/main.lua
+    - assets/scripts/games/demo/main.lua
+    - assets/scripts/games/runner/main.lua
 
 flutter_intl:
   enabled: true

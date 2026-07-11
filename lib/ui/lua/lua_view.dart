@@ -414,6 +414,7 @@ class LuaRenderer {
           width: LuaStyle._d(node['width']),
           height: LuaStyle._d(node['height']) ?? 200,
           child: LoveGameView(
+            canvasId: (LuaStyle._num(node['id']) ?? 0).toInt(),
             gamePath: gp == null ? null : '$gp',
             autoSuspend: node['autopause'] != false,
           ),

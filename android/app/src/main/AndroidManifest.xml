@@ -81,5 +81,11 @@
                 <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
             </intent-filter>
         </provider>
+
+        <!-- LÖVE multi-instance: each love canvas runs in its own process -->
+        <service android:name="com.astrbot.astrbot_android.LoveService0" android:process=":love0" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.astrbot.astrbot_android.LoveService1" android:process=":love1" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.astrbot.astrbot_android.LoveService2" android:process=":love2" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.astrbot.astrbot_android.LoveService3" android:process=":love3" android:exported="false" android:stopWithTask="false" />
     </application>
 </manifest>

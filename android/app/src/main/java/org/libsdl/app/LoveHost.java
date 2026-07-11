@@ -1,6 +1,6 @@
 package org.libsdl.app;
 
-import android.app.Activity;
+import android.content.Context;
 import android.util.Log;
 import android.view.Surface;
 
@@ -19,7 +19,7 @@ public class LoveHost {
     private static boolean sBooted = false;
 
     /** First-time boot of the embedded LÖVE engine into the given texture surface. */
-    public static synchronized void start(Activity host, Surface surface, int width, int height,
+    public static synchronized void start(Context host, Surface surface, int width, int height,
                                           String[] libraries, String mainSharedObject,
                                           String mainFunction, String[] arguments) {
         if (sBooted) {

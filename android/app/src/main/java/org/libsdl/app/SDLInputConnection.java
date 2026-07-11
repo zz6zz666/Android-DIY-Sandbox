@@ -14,7 +14,7 @@ class SDLInputConnection extends BaseInputConnection
 
     SDLInputConnection(View targetView, boolean fullEditor) {
         super(targetView, fullEditor);
-        mEditText = new EditText(SDL.getContext());
+        mEditText = new EditText(SDL.getAppContext());
     }
 
     @Override

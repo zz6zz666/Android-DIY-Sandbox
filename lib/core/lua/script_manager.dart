@@ -22,7 +22,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '24';
+  static const String _defaultScriptsVersion = '26';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -162,6 +162,7 @@ class ScriptManager {
           if (!key.startsWith('assets/scripts/') || !key.endsWith('.lua')) continue;
           final name = key.substring('assets/scripts/'.length);
           final out = File('${dir.path}/$name');
+          if (!out.parent.existsSync()) out.parent.createSync(recursive: true);
           final data = await rootBundle.load(key);
           out.writeAsBytesSync(data.buffer
               .asUint8List(data.offsetInBytes, data.lengthInBytes));
@@ -183,6 +184,8 @@ class ScriptManager {
         "package.path = '$scriptsDir/?.lua;$scriptsDir/?/init.lua;' .. package.path",
         chunkName: 'package_path',
       );
+      // 暴露脚本根目录的绝对路径, 供 Lua 侧构造 game 路径等
+      _engine.doString("SCRIPTS = [[$scriptsDir]]", chunkName: 'scripts_dir');
       _engine.doString(main.readAsStringSync(), chunkName: 'main.lua');
     }
   }

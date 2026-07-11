@@ -26,7 +26,17 @@ class LovePageActive extends InheritedWidget {
 /// when the widget's nav page is hidden or the app is backgrounded, and resumed
 /// when shown again — so game state is never lost on an accidental tab switch.
 class LoveGameView extends StatefulWidget {
-  const LoveGameView({super.key, this.gamePath, this.autoSuspend = true});
+  const LoveGameView({
+    super.key,
+    this.canvasId = 0,
+    this.gamePath,
+    this.autoSuspend = true,
+  });
+
+  /// Stable identity of this canvas (0..3). Each distinct id runs in its own
+  /// process and is an independent love instance. Placing multiple canvases
+  /// means giving each a different id.
+  final int canvasId;
 
   /// Path to a `.love` archive or a directory with `main.lua`. Null -> sample.
   final String? gamePath;
@@ -75,12 +85,12 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
     if (_shouldRun && !_running) {
       _running = true;
       try {
-        await _channel.invokeMethod('resume');
+        await _channel.invokeMethod('resume', {'canvasId': widget.canvasId});
       } catch (_) {}
     } else if (!_shouldRun && _running) {
       _running = false;
       try {
-        await _channel.invokeMethod('pause');
+        await _channel.invokeMethod('pause', {'canvasId': widget.canvasId});
       } catch (_) {}
     }
   }
@@ -91,6 +101,7 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
     _starting = true;
     try {
       final int id = await _channel.invokeMethod('start', {
+        'canvasId': widget.canvasId,
         'width': w,
         'height': h,
         if (widget.gamePath != null) 'path': widget.gamePath,
@@ -114,7 +125,11 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
     _pxW = w;
     _pxH = h;
     try {
-      await _channel.invokeMethod('resize', {'width': w, 'height': h});
+      await _channel.invokeMethod('resize', {
+        'canvasId': widget.canvasId,
+        'width': w,
+        'height': h,
+      });
     } catch (_) {}
   }
 
@@ -122,7 +137,7 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     // Keep the engine alive; just stop rendering.
-    _channel.invokeMethod('pause');
+    _channel.invokeMethod('pause', {'canvasId': widget.canvasId});
     super.dispose();
   }
 
@@ -131,6 +146,7 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
     final double nx = (local.dx / _logW).clamp(0.0, 1.0);
     final double ny = (local.dy / _logH).clamp(0.0, 1.0);
     _channel.invokeMethod('touch', {
+      'canvasId': widget.canvasId,
       'id': 0,
       'action': action,
       'x': nx,

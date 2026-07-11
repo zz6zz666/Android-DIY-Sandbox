@@ -131,7 +131,8 @@ function expansion(title, children, o) o=o or {}; o.title=title; o.children=chil
 function tabs(o) return comp("tabs", o or {}) end
 
 -- LÖVE (love2d) 动态渲染画布: 一块可与其它 Lua 组件同层排版的"贴纸画布"。
--- love{ height=200, game="/path/to/game.love 或目录", autopause=true }
+-- love{ id=0, height=200, game="/path/to/game.love 或目录", autopause=true }
+-- id: 画布标识 (0..3), 不同 id 运行在各自独立进程中, 可同屏多块, 默认为 0。
 -- game 省略时使用内置示例(弹跳球)。
 -- autopause: 切到其它导航页时自动挂起(停渲染、留内存、不丢状态), 默认 true;
 --            设为 false 则一直渲染。(注: SDL 无法进程内销毁重启, 故只有挂起/恢复)

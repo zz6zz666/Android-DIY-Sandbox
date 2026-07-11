@@ -1231,17 +1231,11 @@ end
 app.page("home", function(ctx)
   return {
     quick_start_card(ctx),
-    -- love 画布: 不套卡片, 直接和普通 Flutter 组件在一个 row 里并排排版
+    -- 双画布: 左边演示动画, 右边触摸小跑酷
     row({
-      expanded(love{ height = 160 }),
+      expanded(love{ id = 0, height = 200, game = SCRIPTS.."/games/demo" }),
       spacer(8),
-      expanded(column({
-        text("← 左边是 love2d 画布", { weight = "bold" }),
-        spacer(6),
-        text("右边是普通 Flutter 文本, 和它同排。"),
-        spacer(6),
-        button("普通按钮", function() host.toast("我是同排的普通按钮") end),
-      })),
+      expanded(love{ id = 1, height = 240, game = SCRIPTS.."/games/runner" }),
     }, { crossAxis = "center" }),
     napcat_card(ctx),
     env_card(),

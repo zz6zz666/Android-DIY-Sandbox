@@ -112,6 +112,10 @@ android {
             pickFirsts += ['**/libc++_shared.so']
         }
     }
+
+    buildFeatures {
+        aidl true
+    }
 }
 
 flutter {

@@ -77,9 +77,9 @@ public class MainActivity extends FragmentActivity {
         GeneratedPluginRegistrant.registerWith(flutterEngine);
         // LÖVE (love2d) texture bridge: renders the game into a Flutter texture.
         MethodChannel loveChannel = new MethodChannel(
-                flutterEngine.getDartExecutor().getBinaryMessenger(), LoveTextureController.CHANNEL);
+                flutterEngine.getDartExecutor().getBinaryMessenger(), LoveMultiManager.CHANNEL);
         loveChannel.setMethodCallHandler(
-                new LoveTextureController(this, flutterEngine.getRenderer()));
+                new LoveMultiManager(this, flutterEngine.getRenderer()));
         FlutterEngineCache.getInstance().put("my_engine_id", flutterEngine);
         if (flutterFragment == null) {
             flutterFragment = FlutterFragment.withCachedEngine("my_engine_id").build();

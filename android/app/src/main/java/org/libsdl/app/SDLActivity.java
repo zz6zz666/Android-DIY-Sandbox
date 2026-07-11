@@ -234,7 +234,7 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     // hosted inside a Flutter PlatformView. mSingleton stays null; the host FlutterActivity
     // provides window/context, and the SDL thread is launched via runEmbeddedMain().
     public static boolean mIsEmbedded = false;
-    public static Activity mHostActivity = null;
+    public static android.content.Context mHostActivity = null;
     public static String mEmbedMainLib = null;
     public static String mEmbedMainFunc = "SDL_main";
     public static String[] mEmbedArgs = new String[0];
@@ -245,8 +245,8 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     public static android.view.Surface mEmbedTextureSurface = null;
     public static boolean mEmbedSurfaceReady = false;
 
-    /** Returns the Activity that owns the window/context (host when embedded, else the SDLActivity). */
-    public static Activity hostActivity() {
+    /** Returns the context that owns the window/context (host when embedded, else the SDLActivity). */
+    public static android.content.Context hostActivity() {
         return mIsEmbedded ? mHostActivity : mSingleton;
     }
 
@@ -616,10 +616,11 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     public static int getNaturalOrientation() {
         int result = SDL_ORIENTATION_UNKNOWN;
 
-        Activity activity = getContext();
-        if (activity != null) {
+        Context activity = getAppContext();
+        if (activity instanceof android.app.Activity) {
+            android.app.Activity a = (android.app.Activity) activity;
             Configuration config = activity.getResources().getConfiguration();
-            Display display = activity.getWindowManager().getDefaultDisplay();
+            Display display = a.getWindowManager().getDefaultDisplay();
             int rotation = display.getRotation();
             if (((rotation == Surface.ROTATION_0 || rotation == Surface.ROTATION_180) &&
                     config.orientation == Configuration.ORIENTATION_LANDSCAPE) ||
@@ -636,9 +637,10 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     public static int getCurrentRotation() {
         int result = 0;
 
-        Activity activity = getContext();
-        if (activity != null) {
-            Display display = activity.getWindowManager().getDefaultDisplay();
+        Context activity = getAppContext();
+        if (activity instanceof android.app.Activity) {
+            android.app.Activity a = (android.app.Activity) activity;
+            Display display = a.getWindowManager().getDefaultDisplay();
             switch (display.getRotation()) {
                 case Surface.ROTATION_0:
                     result = 0;
@@ -1322,8 +1324,13 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     /**
      * This method is called by SDL using JNI.
      */
-    public static Activity getContext() {
-        return SDL.getContext();
+    public static android.content.Context getContext() {
+        return SDL.getAppContext();
+    }
+
+    /** Java-internal accessor that does NOT require an Activity. */
+    public static android.content.Context getAppContext() {
+        return SDL.getAppContext();
     }
 
     /**
@@ -1359,11 +1366,11 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     public static double getDiagonal()
     {
         DisplayMetrics metrics = new DisplayMetrics();
-        Activity activity = getContext();
-        if (activity == null) {
+        Context activity = getAppContext();
+        if (!(activity instanceof android.app.Activity)) {
             return 0.0;
         }
-        activity.getWindowManager().getDefaultDisplay().getMetrics(metrics);
+        ((android.app.Activity) activity).getWindowManager().getDefaultDisplay().getMetrics(metrics);
 
         double dWidthInches = metrics.widthPixels / (double)metrics.xdpi;
         double dHeightInches = metrics.heightPixels / (double)metrics.ydpi;
@@ -2017,9 +2024,13 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
             return;
         }
 
-        Activity activity = getContext();
+        Context activity = getAppContext();
         if (activity.checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
-            activity.requestPermissions(new String[]{permission}, requestCode);
+            if (activity instanceof android.app.Activity) {
+                ((android.app.Activity) activity).requestPermissions(new String[]{permission}, requestCode);
+            } else {
+                nativePermissionResult(requestCode, false);
+            }
         } else {
             nativePermissionResult(requestCode, true);
         }
@@ -2265,7 +2276,7 @@ class SDLClipboardHandler implements
     protected ClipboardManager mClipMgr;
 
     SDLClipboardHandler() {
-       mClipMgr = (ClipboardManager) SDL.getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+       mClipMgr = (ClipboardManager) SDL.getAppContext().getSystemService(Context.CLIPBOARD_SERVICE);
        mClipMgr.addPrimaryClipChangedListener(this);
     }
 

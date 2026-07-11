@@ -28,12 +28,18 @@ public class SDL {
     }
 
     // This function stores the current activity (SDL or not)
-    static public void setContext(Activity context) {
+    static public void setContext(Context context) {
         SDLAudioManager.setContext(context);
         mContext = context;
     }
 
+    /** Used by native JNI (must keep Activity return type for .so compatibility). */
     static public Activity getContext() {
+        return mContext instanceof Activity ? (Activity) mContext : null;
+    }
+
+    /** Used by Java code that does not require an Activity. */
+    static public Context getAppContext() {
         return mContext;
     }
 
@@ -86,5 +92,5 @@ public class SDL {
         }
     }
 
-    protected static Activity mContext;
+    protected static Context mContext;
 }

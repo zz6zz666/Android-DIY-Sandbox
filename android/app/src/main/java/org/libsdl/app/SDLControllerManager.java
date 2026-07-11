@@ -707,7 +707,7 @@ class SDLHapticHandler {
         boolean hasVibratorService = false;
 
         /* Check VIBRATOR_SERVICE */
-        Vibrator vib = (Vibrator) SDL.getContext().getSystemService(Context.VIBRATOR_SERVICE);
+        Vibrator vib = (Vibrator) SDL.getAppContext().getSystemService(Context.VIBRATOR_SERVICE);
         if (vib != null) {
             hasVibratorService = vib.hasVibrator();
 
