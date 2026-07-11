@@ -67,6 +67,7 @@ flutter:
     - assets/scripts/games/
     - assets/scripts/games/demo/
     - assets/scripts/games/runner/
+    - assets/scripts/games/bounce/
     - assets/scripts/widgets/
     - assets/scripts/apps/
     - assets/scripts/agent.lua
@@ -77,6 +78,7 @@ flutter:
     - assets/scripts/AGENTS.md
     - assets/scripts/games/demo/main.lua
     - assets/scripts/games/runner/main.lua
+    - assets/scripts/games/bounce/main.lua
 
 flutter_intl:
   enabled: true

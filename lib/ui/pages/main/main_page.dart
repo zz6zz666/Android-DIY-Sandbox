@@ -307,7 +307,7 @@ class _MainPageState extends State<MainPage> {
               onDestinationSelected: _onNavTap,
               backgroundColor: Colors.transparent,
               elevation: 0,
-              height: 46,
+              height: 56,
               labelTextStyle: WidgetStateProperty.all(
                 const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
               ),

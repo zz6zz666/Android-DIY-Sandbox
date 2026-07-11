@@ -143,8 +143,11 @@ public class MainActivity extends FragmentActivity {
         if (hasFocus) hideNavigationBar();
     }
 
-    /** 隐藏底部三键/手势导航栏(粘性沉浸),保留状态栏。全程强制,启动即生效。 */
+    /** 隐藏底部三键/两键导航栏(粘性沉浸),保留状态栏。全程强制,启动即生效。 */
     private void hideNavigationBar() {
+        // 仅在三键/两键导航设备上隐藏; 手势导航设备若隐藏会拦截"上滑回桌面"手势
+        // (需上滑两次且卡顿), 故保持系统默认。
+        if (!shouldHideNavBar()) return;
         Window window = getWindow();
         if (window == null) return;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -162,6 +165,22 @@ public class MainActivity extends FragmentActivity {
                             | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                             | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         }
+    }
+
+    /**
+     * 是否应隐藏导航栏。仅三键(0)/两键(1)导航时隐藏; 手势导航(2)时返回 false,
+     * 避免拦截系统的上滑回桌面手势。Q 以下无手势导航, 一律视为三键。
+     */
+    private boolean shouldHideNavBar() {
+        try {
+            int resId = getResources().getIdentifier(
+                    "config_navBarInteractionMode", "integer", "android");
+            if (resId > 0) {
+                return getResources().getInteger(resId) != 2; // 2 = 手势导航
+            }
+        } catch (Exception ignored) {
+        }
+        return true; // 取不到(旧系统): 只有三键, 隐藏
     }
 
     private void postNotification(int id, String title, String body, String channelId,
