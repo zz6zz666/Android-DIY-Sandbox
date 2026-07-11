@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:archive/archive.dart';
 import 'package:convert/convert.dart' show hex;
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:device_info_plus/device_info_plus.dart';
@@ -31,13 +32,15 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '64';
+  static const String _defaultScriptsVersion = '68';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
   List<Map<String, dynamic>> _navTabs = [];
   /// 由 Lua 注册的主页顶栏自定义按钮 (渲染在设置按钮左侧, 可多个)。
   List<Map<String, dynamic>> _homeActions = [];
+  /// Agent 入口按钮 (来自受保护的 agent/main.lua, 与用户 main.lua 解耦, 不会被其覆盖)。
+  List<Map<String, dynamic>> _agentActions = [];
   bool _initialized = false;
   String? lastError;
 
@@ -65,6 +68,7 @@ class ScriptManager {
   bool get initialized => _initialized;
   List<Map<String, dynamic>> get navTabs => _navTabs;
   List<Map<String, dynamic>> get homeActions => _homeActions;
+  List<Map<String, dynamic>> get agentActions => _agentActions;
   List<String> get pageNames => _pages.keys.toList();
 
   String get scriptsDir => '${RuntimeEnvir.configPath}/scripts';
@@ -73,6 +77,12 @@ class ScriptManager {
     if (_initialized) return;
     _engine.open();
     LuaStore.instance.init('${RuntimeEnvir.configPath}/store');
+    try {
+      LoveBridge.instance.bridgeSource =
+          await rootBundle.loadString('assets/love_host.lua');
+    } catch (e) {
+      debugPrint('[ScriptManager] 载入 love_host.lua 失败: $e');
+    }
     _registerHandlers();
     await _releaseDefaultScripts();
     try {
@@ -90,8 +100,10 @@ class ScriptManager {
     _pages.clear();
     _navTabs = [];
     _homeActions = [];
+    _agentActions = [];
     _reactives.clear();
     _initialized = false;
+    lastError = null;
     // 重新开一个干净的 lua_State, 避免残留全局
     _engine.close();
     await initialize();
@@ -151,6 +163,66 @@ class ScriptManager {
     _showApplyCountdown();
   }
 
+  /// 导出整个脚本释放目录 (含 .lua / AGENTS.md / 子目录) 为 zip 到系统下载目录。
+  /// 返回文件路径 (失败返回 null)。
+  Future<String?> exportScriptsZip() async {
+    try {
+      final dir = Directory(scriptsDir);
+      if (!dir.existsSync()) return null;
+      final archive = Archive();
+      for (final f in dir.listSync(recursive: true)) {
+        if (f is File) {
+          final rel = f.path.substring(dir.path.length + 1);
+          if (rel == '.default_version') continue; // 版本标记不导出
+          final bytes = f.readAsBytesSync();
+          archive.addFile(ArchiveFile(rel, bytes.length, bytes));
+        }
+      }
+      final zip = ZipEncoder().encode(archive);
+      final stamp = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .replaceAll('.', '-');
+      final outDir = Directory('/storage/emulated/0/Download');
+      if (!outDir.existsSync()) outDir.createSync(recursive: true);
+      final outPath = '${outDir.path}/lua_scripts_$stamp.zip';
+      File(outPath).writeAsBytesSync(zip);
+      return outPath;
+    } catch (e) {
+      LuaLog.instance.error('导出脚本失败: $e');
+      return null;
+    }
+  }
+
+  /// 从 zip 覆盖替换整个脚本释放目录, 然后重载。返回是否成功。
+  Future<bool> importScriptsZip(String zipPath) async {
+    try {
+      final bytes = File(zipPath).readAsBytesSync();
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final dir = Directory(scriptsDir);
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+      dir.createSync(recursive: true);
+      for (final f in archive) {
+        final outPath = '$scriptsDir/${f.name}';
+        if (f.isFile) {
+          final out = File(outPath);
+          out.parent.createSync(recursive: true);
+          out.writeAsBytesSync(f.content as List<int>);
+        } else {
+          Directory(outPath).createSync(recursive: true);
+        }
+      }
+      // 写入当前版本标记, 防止内置释放机制回头覆盖用户导入的内容。
+      File('$scriptsDir/.default_version').writeAsStringSync(_defaultScriptsVersion);
+      await reload();
+      stateRevision.value++;
+      return lastError == null;
+    } catch (e) {
+      LuaLog.instance.error('导入脚本失败: $e');
+      return false;
+    }
+  }
+
   /// 15s 倒计时对话框: 保留/回退。
   Future<void> _showApplyCountdown() async {
     final ctx = Get.context;
@@ -176,14 +248,15 @@ class ScriptManager {
     final marker = File('${dir.path}/.default_version');
     final installedVer =
         marker.existsSync() ? marker.readAsStringSync().trim() : '';
-    // 内置默认脚本版本变化时重新释放全部 .lua 文件 (施工期覆盖; 后续可改为仅覆盖未修改文件)
+    // 内置默认脚本版本变化时重新释放全部文件 (含 AGENTS.md 等非 .lua 文档)
     if (installedVer != _defaultScriptsVersion) {
       try {
         final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
         var copied = 0;
         for (final key in manifest.listAssets()) {
-          if (!key.startsWith('assets/scripts/') || !key.endsWith('.lua')) continue;
+          if (!key.startsWith('assets/scripts/')) continue;
           final name = key.substring('assets/scripts/'.length);
+          if (name.isEmpty) continue;
           final out = File('${dir.path}/$name');
           if (!out.parent.existsSync()) out.parent.createSync(recursive: true);
           final data = await rootBundle.load(key);
@@ -191,7 +264,7 @@ class ScriptManager {
               .asUint8List(data.offsetInBytes, data.lengthInBytes));
           copied++;
         }
-        debugPrint('[ScriptManager] 已释放 $copied 个默认脚本 (v$_defaultScriptsVersion)');
+        debugPrint('[ScriptManager] 已释放 $copied 个默认脚本文件 (v$_defaultScriptsVersion)');
       } catch (e) {
         debugPrint('[ScriptManager] 释放脚本失败: $e');
       }
@@ -200,16 +273,36 @@ class ScriptManager {
   }
 
   void _loadUserScripts() {
+    // 让 require 能从脚本目录加载模块 (agent.lua 等), 并暴露脚本根目录绝对路径。
+    _engine.doString(
+      "package.path = '$scriptsDir/?.lua;$scriptsDir/?/init.lua;' .. package.path",
+      chunkName: 'package_path',
+    );
+    _engine.doString("SCRIPTS = [[$scriptsDir]]", chunkName: 'scripts_dir');
+
+    // 1) Agent 入口 (受保护, 独立加载): 与用户 main.lua 解耦。
+    //    无论用户 main.lua 是否存在/损坏, agent 入口都先行且独立加载,
+    //    这样用户随意定制 UI 也不会把 agent 启动入口弄丢。
+    final agentMain = File('$scriptsDir/agent/main.lua');
+    if (agentMain.existsSync()) {
+      try {
+        _engine.doString(agentMain.readAsStringSync(), chunkName: 'agent/main.lua');
+      } catch (e) {
+        debugPrint('[ScriptManager] agent/main.lua 加载失败: $e');
+        LuaLog.instance.error('agent 入口加载失败: $e');
+      }
+    }
+
+    // 2) 用户主脚本 (可自由定制; 崩溃不影响已加载的 agent 入口)。
     final main = File('$scriptsDir/main.lua');
     if (main.existsSync()) {
-      // 让 require 能从脚本目录加载模块 (agent.lua 等)
-      _engine.doString(
-        "package.path = '$scriptsDir/?.lua;$scriptsDir/?/init.lua;' .. package.path",
-        chunkName: 'package_path',
-      );
-      // 暴露脚本根目录的绝对路径, 供 Lua 侧构造 game 路径等
-      _engine.doString("SCRIPTS = [[$scriptsDir]]", chunkName: 'scripts_dir');
-      _engine.doString(main.readAsStringSync(), chunkName: 'main.lua');
+      try {
+        _engine.doString(main.readAsStringSync(), chunkName: 'main.lua');
+      } catch (e) {
+        lastError = '$e';
+        debugPrint('[ScriptManager] main.lua 加载失败: $e');
+        LuaLog.instance.error('main.lua 加载失败: $e');
+      }
     }
   }
 
@@ -265,6 +358,19 @@ class ScriptManager {
       final list = a.isNotEmpty ? a[0] : null;
       if (list is List) {
         _homeActions = [
+          for (final t in list)
+            if (t is Map) Map<String, dynamic>.from(t),
+        ];
+        stateRevision.value++;
+      }
+      return null;
+    });
+    // Agent 入口按钮 (来自受保护的 agent/main.lua): 独立于用户 app.actions,
+    // 渲染在最左侧, 不会被用户脚本覆盖。
+    e.registerHandler('register_agent_actions', (a) {
+      final list = a.isNotEmpty ? a[0] : null;
+      if (list is List) {
+        _agentActions = [
           for (final t in list)
             if (t is Map) Map<String, dynamic>.from(t),
         ];

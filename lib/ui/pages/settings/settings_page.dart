@@ -598,7 +598,6 @@ class _SettingsPageState extends State<SettingsPage> {
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
         ),
-        _luaHotUpdateTile(context),
         _updateTile(),
         ..._appearanceItems(context),
         _batteryTile(),
@@ -608,19 +607,6 @@ class _SettingsPageState extends State<SettingsPage> {
         const Divider(),
         _exitTile(),
       ],
-    );
-  }
-
-  Widget _luaHotUpdateTile(BuildContext context) {
-    return ListTile(
-      leading: const Icon(Icons.system_update_alt),
-      title: const Text('Lua 热更新'),
-      subtitle: const Text('联网检查上游脚本更新 (待接入)'),
-      onTap: () {
-        Get.snackbar('Lua', '暂无更新, 当前已是最新版本',
-            snackPosition: SnackPosition.BOTTOM,
-            duration: const Duration(seconds: 1));
-      },
     );
   }
 

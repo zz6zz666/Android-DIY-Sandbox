@@ -143,19 +143,28 @@ class LoveBridge {
   }
 
   final Set<String> _dropped = {};
+
+  /// 通信桥游戏侧源码 (love_host.lua)。由 ScriptManager 在初始化时从 asset 载入一次。
+  /// 它对用户完全不可见: 写入 love 的 save 目录 (而非用户可见的脚本/游戏目录),
+  /// love 的 require 会在 save 目录搜到它, 游戏 `require("love_host")` 即可用。
+  String? bridgeSource;
+
   void _dropBridgeModule(String gamePath, String scriptsDir) {
     try {
-      final dir = Directory(gamePath);
-      if (!dir.existsSync()) return; // .love 归档不支持自动注入
-      final target = '$gamePath/love_host.lua';
-      final src = File('$scriptsDir/love_host.lua');
-      if (!src.existsSync()) return;
-      // 每次源较新或未拷贝过则更新。
-      final key = gamePath;
-      final tf = File(target);
-      if (_dropped.contains(key) && tf.existsSync()) return;
-      src.copySync(target);
-      _dropped.add(key);
+      final src = bridgeSource;
+      if (src == null || src.isEmpty) return;
+      // love 无 conf.lua 时, identity 默认取游戏目录名; save 目录为
+      // <configRoot>/save/love/<identity>。configRoot 为 scriptsDir 的上级 (files 目录)。
+      final identity = gamePath.split('/').where((s) => s.isNotEmpty).last;
+      final configRoot = Directory(scriptsDir).parent.path;
+      final saveDir = Directory('$configRoot/save/love/$identity');
+      if (_dropped.contains(identity) &&
+          File('${saveDir.path}/love_host.lua').existsSync()) {
+        return;
+      }
+      saveDir.createSync(recursive: true);
+      File('${saveDir.path}/love_host.lua').writeAsStringSync(src);
+      _dropped.add(identity);
     } catch (e) {
       LuaLog.instance.warn('注入 love_host.lua 失败: $e');
     }

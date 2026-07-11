@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -85,11 +86,54 @@ class _MainPageState extends State<MainPage> {
   void _openSettings() => setState(() => _showSettings = true);
   void _closeSettings() => setState(() => _showSettings = false);
 
+  /// 导出整个脚本释放目录为 zip 到系统下载目录。
+  Future<void> _exportScripts() async {
+    final path = await ScriptManager.instance.exportScriptsZip();
+    if (!mounted) return;
+    Get.snackbar(
+      path != null ? '导出成功' : '导出失败',
+      path != null ? '已保存到 $path' : '请检查存储权限',
+      snackPosition: SnackPosition.BOTTOM,
+      duration: const Duration(seconds: 3),
+    );
+  }
+
+  /// 选择一个 zip, 替换整个脚本释放目录并重载。
+  Future<void> _importScripts() async {
+    final confirmed = await Get.dialog<bool>(
+      AlertDialog(
+        title: const Text('导入脚本'),
+        content: const Text('将用所选 zip 覆盖替换整个脚本目录 (含 main.lua / agent / 文档), '
+            '当前内容会被清空。建议先导出备份。是否继续?'),
+        actions: [
+          TextButton(onPressed: () => Get.back(result: false), child: const Text('取消')),
+          FilledButton(onPressed: () => Get.back(result: true), child: const Text('选择 zip')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final res = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['zip'],
+      allowMultiple: false,
+    );
+    final path = res?.files.single.path;
+    if (path == null) return;
+    final ok = await ScriptManager.instance.importScriptsZip(path);
+    if (!mounted) return;
+    if (ok) setState(() {});
+    Get.snackbar(
+      ok ? '导入成功' : '导入失败',
+      ok ? '脚本已替换并重载' : (ScriptManager.instance.lastError ?? '请检查 zip 内容'),
+      snackPosition: SnackPosition.BOTTOM,
+      duration: const Duration(seconds: 3),
+    );
+  }
+
   /// 由 Lua 注册的主页顶栏自定义按钮 (设置按钮左侧, 可多个)。
+  /// 顺序: agent 入口按钮 (受保护, 最左) → 用户 app.actions 按钮。
   List<Widget> _buildLuaActions() {
-    return [
-      for (final act in ScriptManager.instance.homeActions)
-        IconButton(
+    Widget btn(Map act) => IconButton(
           tooltip: act['tooltip'] == null ? null : '${act['tooltip']}',
           icon: Icon(luaIconFor(act['icon']) ?? Icons.extension),
           onPressed: () {
@@ -97,7 +141,10 @@ class _MainPageState extends State<MainPage> {
             if (fn is LuaFunctionRef) fn.call();
             ScriptManager.instance.stateRevision.value++;
           },
-        ),
+        );
+    return [
+      for (final act in ScriptManager.instance.agentActions) btn(act),
+      for (final act in ScriptManager.instance.homeActions) btn(act),
     ];
   }
 
@@ -136,6 +183,16 @@ class _MainPageState extends State<MainPage> {
                 onPressed: _closeSettings,
               ),
               actions: [
+                IconButton(
+                  tooltip: '导入脚本 (zip)',
+                  icon: const Icon(Icons.file_upload_outlined),
+                  onPressed: _importScripts,
+                ),
+                IconButton(
+                  tooltip: '导出脚本 (zip)',
+                  icon: const Icon(Icons.file_download_outlined),
+                  onPressed: _exportScripts,
+                ),
                 IconButton(
                   tooltip: 'Lua 日志',
                   icon: const Icon(Icons.article_outlined),

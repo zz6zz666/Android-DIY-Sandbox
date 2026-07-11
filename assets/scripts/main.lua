@@ -1,5 +1,5 @@
--- AstrBot 泡泡版 · 默认脚本 (位于 {configPath}/scripts/main.lua, 可直接编辑, 设置页"Lua 热更新"重载)
--- API 详见 docs/lua_api.md
+-- 泡泡版 · 默认脚本 (位于 {configPath}/scripts/main.lua, 可直接编辑, 主页顶栏刷新键重载)
+-- API 详见同目录 AGENTS.md
 
 -- 独立 agent 模块 (opencode 引擎: 安装/启动/WebUI 托管), 界面在本文件编排
 local agent = require("agent")
@@ -1347,12 +1347,5 @@ app.page("game_full", function()
   })
 end)
 
--- 主页顶栏自定义按钮 (设置按钮左侧): DIY = 启动 opencode 引擎并打开 WebUI
-app.actions({
-  { icon = "construction", tooltip = "DIY 脚本定制", onTap = function()
-    agent.launch("/app-lua-runtime", "opencode-lua")
-  end },
-  { icon = "smart_toy_outlined", tooltip = "opencode AI 助手", onTap = function()
-    agent.launch()
-  end },
-})
+-- 主页顶栏的两个 Agent 入口按钮已移至受保护的 agent/main.lua,
+-- 与本文件解耦: 即使这里被改坏, agent 启动入口依然稳定存在。

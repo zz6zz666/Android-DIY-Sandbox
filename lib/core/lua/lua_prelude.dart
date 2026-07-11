@@ -331,6 +331,8 @@ function app.page(name, fn) __host_call("register_page", name, fn) end
 -- 主页顶栏自定义按钮 (渲染在设置按钮左侧, 可多个):
 -- app.actions({ { icon="rocket_launch", tooltip="启动", onTap=function() end }, ... })
 function app.actions(list) __host_call("register_actions", list or {}) end
+-- Agent 入口按钮 (供 agent/main.lua 使用, 渲染在最左侧, 独立于用户 app.actions):
+function app.agent_actions(list) __host_call("register_agent_actions", list or {}) end
 nav = {}
 function nav.tabs(list) __host_call("nav_tabs", list) end
 

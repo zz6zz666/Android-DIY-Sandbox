@@ -62,13 +62,15 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+    - assets/love_host.lua
     - assets/scripts/
     - assets/scripts/games/
     - assets/scripts/games/demo/
     - assets/scripts/games/runner/
     - assets/scripts/agent.lua
+    - assets/scripts/agent/main.lua
     - assets/scripts/main.lua
-    - assets/scripts/love_host.lua
+    - assets/scripts/AGENTS.md
     - assets/scripts/games/demo/main.lua
     - assets/scripts/games/runner/main.lua
 
