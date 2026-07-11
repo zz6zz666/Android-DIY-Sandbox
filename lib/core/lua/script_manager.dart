@@ -1,12 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
+import 'package:convert/convert.dart' show hex;
+import 'package:crypto/crypto.dart' as crypto;
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dio/dio.dart';
+import 'package:dio/dio.dart' as dio show FormData, MultipartFile;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle, AssetManifest, Clipboard, ClipboardData;
 import 'package:get/get.dart';
 import 'package:global_repository/global_repository.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:settings/settings.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -22,7 +28,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '31';
+  static const String _defaultScriptsVersion = '35';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -40,6 +46,7 @@ class ScriptManager {
   int _netSeq = 0;
   final Map<int, CancelToken> _httpCancels = {};
   final Map<int, WebSocket> _sockets = {};
+  final Map<int, Timer> _intervals = {};
 
   bool get initialized => _initialized;
   List<Map<String, dynamic>> get navTabs => _navTabs;
@@ -653,6 +660,225 @@ class ScriptManager {
       } catch (_) {}
       return null;
     });
+
+    _registerToolkitHandlers(e, cbOf);
+  }
+
+  // ==================== DIY 沙盒工具箱 (编码/加密/定时/二进制/设备) ====================
+
+  List<int> _bytesOf(Object? v) {
+    // 字符串按 UTF-8; List 视为字节数组 (0-255)。
+    if (v is List) {
+      return [for (final b in v) (b is num ? b.toInt() : int.tryParse('$b') ?? 0) & 0xff];
+    }
+    return utf8.encode('${v ?? ''}');
+  }
+
+  void _registerToolkitHandlers(
+      LuaEngine e, LuaFunctionRef? Function(List<Object?>, int) cbOf) {
+    // ---- 编码 ----
+    e.registerHandler('base64_encode', (a) {
+      if (a.isEmpty) return null;
+      return base64.encode(_bytesOf(a[0]));
+    });
+    e.registerHandler('base64_decode', (a) {
+      if (a.isEmpty) return null;
+      try {
+        final bytes = base64.decode('${a[0]}');
+        // asBytes=true 返回字节数组; 否则按 UTF-8 文本
+        final asBytes = a.length > 1 && a[1] == true;
+        return asBytes ? bytes.toList() : utf8.decode(bytes, allowMalformed: true);
+      } catch (_) {
+        return null;
+      }
+    });
+    e.registerHandler('hex_encode', (a) {
+      if (a.isEmpty) return null;
+      return hex.encode(_bytesOf(a[0]));
+    });
+    e.registerHandler('hex_decode', (a) {
+      if (a.isEmpty) return null;
+      try {
+        final bytes = hex.decode('${a[0]}');
+        final asBytes = a.length > 1 && a[1] == true;
+        return asBytes ? bytes : utf8.decode(bytes, allowMalformed: true);
+      } catch (_) {
+        return null;
+      }
+    });
+    e.registerHandler('url_encode', (a) {
+      if (a.isEmpty) return null;
+      // component=false 时用 encodeFull (保留 /:?&= 等); 默认 component 编码。
+      final component = !(a.length > 1 && a[1] == false);
+      return component ? Uri.encodeComponent('${a[0]}') : Uri.encodeFull('${a[0]}');
+    });
+    e.registerHandler('url_decode', (a) {
+      if (a.isEmpty) return null;
+      try {
+        return Uri.decodeComponent('${a[0]}');
+      } catch (_) {
+        return null;
+      }
+    });
+
+    // ---- 哈希 / HMAC (默认 hex 输出; b64=true 输出 base64) ----
+    String digestOut(List<int> bytes, bool b64) =>
+        b64 ? base64.encode(bytes) : hex.encode(bytes);
+    e.registerHandler('hash', (a) {
+      // hash(algo, data, b64?) algo: md5|sha1|sha256|sha512
+      if (a.length < 2) return null;
+      final algo = '${a[0]}'.toLowerCase();
+      final data = _bytesOf(a[1]);
+      final b64 = a.length > 2 && a[2] == true;
+      crypto.Hash? h;
+      switch (algo) {
+        case 'md5':
+          h = crypto.md5;
+          break;
+        case 'sha1':
+          h = crypto.sha1;
+          break;
+        case 'sha256':
+          h = crypto.sha256;
+          break;
+        case 'sha512':
+          h = crypto.sha512;
+          break;
+      }
+      if (h == null) return null;
+      return digestOut(h.convert(data).bytes, b64);
+    });
+    e.registerHandler('hmac', (a) {
+      // hmac(algo, key, data, b64?) algo: sha256|sha1|sha512|md5
+      if (a.length < 3) return null;
+      final algo = '${a[0]}'.toLowerCase();
+      final key = _bytesOf(a[1]);
+      final data = _bytesOf(a[2]);
+      final b64 = a.length > 3 && a[3] == true;
+      crypto.Hash? h;
+      switch (algo) {
+        case 'md5':
+          h = crypto.md5;
+          break;
+        case 'sha1':
+          h = crypto.sha1;
+          break;
+        case 'sha256':
+          h = crypto.sha256;
+          break;
+        case 'sha512':
+          h = crypto.sha512;
+          break;
+      }
+      if (h == null) return null;
+      return digestOut(crypto.Hmac(h, key).convert(data).bytes, b64);
+    });
+
+    // ---- 随机 ----
+    final rnd = math.Random.secure();
+    e.registerHandler('random_bytes', (a) {
+      final n = a.isNotEmpty ? (a[0] as num?)?.toInt() ?? 16 : 16;
+      final bytes = List<int>.generate(n.clamp(0, 4096), (_) => rnd.nextInt(256));
+      // 默认 hex; b64=true 或 'raw' 可选
+      final fmt = a.length > 1 ? '${a[1]}' : 'hex';
+      if (fmt == 'b64' || fmt == 'base64') return base64.encode(bytes);
+      if (fmt == 'raw' || fmt == 'bytes') return bytes;
+      return hex.encode(bytes);
+    });
+    e.registerHandler('uuid', (_) {
+      final b = List<int>.generate(16, (_) => rnd.nextInt(256));
+      b[6] = (b[6] & 0x0f) | 0x40; // version 4
+      b[8] = (b[8] & 0x3f) | 0x80; // variant
+      final h = hex.encode(b);
+      return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-'
+          '${h.substring(16, 20)}-${h.substring(20)}';
+    });
+
+    // ---- 二进制文件 IO (base64 <-> 文件) ----
+    e.registerHandler('write_bytes', (a) {
+      // write_bytes(path, base64Str) -> bool
+      if (a.length < 2) return false;
+      try {
+        final bytes = base64.decode('${a[1]}');
+        final f = File('${a[0]}');
+        f.parent.createSync(recursive: true);
+        f.writeAsBytesSync(bytes);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    });
+    e.registerHandler('read_bytes', (a) {
+      // read_bytes(path) -> base64Str | nil
+      if (a.isEmpty) return null;
+      final f = File('${a[0]}');
+      if (!f.existsSync()) return null;
+      try {
+        return base64.encode(f.readAsBytesSync());
+      } catch (_) {
+        return null;
+      }
+    });
+
+    // ---- 重复定时器 ----
+    e.registerHandler('interval', (a) {
+      final ms = a.isNotEmpty ? (a[0] as num?)?.toInt() ?? 0 : 0;
+      final cb = cbOf(a, 1);
+      if (cb == null || ms <= 0) return null;
+      final id = ++_netSeq;
+      _intervals[id] = Timer.periodic(Duration(milliseconds: ms), (_) => cb.call());
+      return id;
+    });
+    e.registerHandler('clear_interval', (a) {
+      final id = a.isNotEmpty ? (a[0] as num?)?.toInt() : null;
+      if (id != null) _intervals.remove(id)?.cancel();
+      return null;
+    });
+
+    // ---- 设备/应用信息 ----
+    e.registerHandler('device_info', (_) => _deviceInfo());
+  }
+
+  Map<String, dynamic> _asyncDeviceInfo = {};
+  bool _asyncDeviceLoaded = false;
+  Object? _deviceInfo() {
+    final info = <String, dynamic>{
+      'platform': Platform.operatingSystem,
+      'osVersion': Platform.operatingSystemVersion,
+      'locale': Platform.localeName,
+      'numberOfProcessors': Platform.numberOfProcessors,
+    };
+    // 屏幕信息每次现读 (依赖 context, 早期可能不可用)
+    final ctx = Get.context;
+    if (ctx != null) {
+      final mq = MediaQuery.of(ctx);
+      info['screenW'] = mq.size.width;
+      info['screenH'] = mq.size.height;
+      info['dpr'] = mq.devicePixelRatio;
+      info['textScale'] = mq.textScaler.scale(1.0);
+      info['darkMode'] = mq.platformBrightness == Brightness.dark;
+    }
+    // 型号/SDK/应用版本: 异步加载, 加载完成后并入 (首次调用触发, 之后即带上)
+    info.addAll(_asyncDeviceInfo);
+    if (!_asyncDeviceLoaded) {
+      _asyncDeviceLoaded = true;
+      () async {
+        try {
+          final pkg = await PackageInfo.fromPlatform();
+          _asyncDeviceInfo['appVersion'] = pkg.version;
+          _asyncDeviceInfo['buildNumber'] = pkg.buildNumber;
+          _asyncDeviceInfo['packageName'] = pkg.packageName;
+          if (Platform.isAndroid) {
+            final and = await DeviceInfoPlugin().androidInfo;
+            _asyncDeviceInfo['model'] = and.model;
+            _asyncDeviceInfo['brand'] = and.brand;
+            _asyncDeviceInfo['sdkInt'] = and.version.sdkInt;
+            _asyncDeviceInfo['device'] = and.device;
+          }
+        } catch (_) {}
+      }();
+    }
+    return info;
   }
 
   /// 执行一次 HTTP 请求; 流式时逐块经 on_chunk 回灌, 完成时 on_done 携完整结果。
@@ -678,10 +904,27 @@ class ScriptManager {
     final url = '${spec['url'] ?? ''}';
     final method = '${spec['method'] ?? 'GET'}'.toUpperCase();
     final stream = spec['stream'] == true;
+    final responseType = '${spec['response_type'] ?? 'text'}';
+    final wantBytes = responseType == 'bytes' || responseType == 'base64';
     final timeout = (spec['timeout'] as num?)?.toInt();
     final headers = <String, dynamic>{};
     if (spec['headers'] is Map) {
       (spec['headers'] as Map).forEach((k, v) => headers['$k'] = '$v');
+    }
+
+    // 请求体: form=multipart 表单; body_base64=二进制; 否则 body 原样。
+    Object? requestData;
+    if (spec['form'] is Map) {
+      requestData = _buildFormData(spec['form'] as Map);
+    } else if (spec['body_base64'] != null) {
+      try {
+        requestData = Stream.value(base64.decode('${spec['body_base64']}'));
+        headers.putIfAbsent('content-type', () => 'application/octet-stream');
+      } catch (_) {
+        requestData = null;
+      }
+    } else {
+      requestData = spec['body'];
     }
 
     try {
@@ -691,12 +934,14 @@ class ScriptManager {
       ));
       final resp = await dio.request(
         url,
-        data: spec['body'],
+        data: requestData,
         cancelToken: token,
         options: Options(
           method: method,
           headers: headers,
-          responseType: stream ? ResponseType.stream : ResponseType.plain,
+          responseType: stream
+              ? ResponseType.stream
+              : (wantBytes ? ResponseType.bytes : ResponseType.plain),
           validateStatus: (_) => true,
         ),
       );
@@ -726,6 +971,20 @@ class ScriptManager {
           },
           cancelOnError: true,
         );
+      } else if (wantBytes) {
+        final data = resp.data;
+        final bytes = data is List<int> ? data : <int>[];
+        onDone?.call([
+          {
+            'status': status,
+            'ok': ok,
+            'headers': respHeaders,
+            // base64 便于 Lua 侧 host.write_bytes 存文件或再解码
+            'body': base64.encode(bytes),
+            'is_base64': true,
+          }
+        ]);
+        cleanup();
       } else {
         final body = resp.data == null ? '' : '${resp.data}';
         onDone?.call([
@@ -740,6 +999,40 @@ class ScriptManager {
       }
       cleanup();
     }
+  }
+
+  /// 由 Lua 的 form 规格构造 multipart FormData。
+  /// form = { fields={ k=v, ... }, files={ { name=, path= | base64=, filename=, content_type= }, ... } }
+  dio.FormData _buildFormData(Map form) {
+    final fd = dio.FormData();
+    final fields = form['fields'];
+    if (fields is Map) {
+      fields.forEach((k, v) => fd.fields.add(MapEntry('$k', '$v')));
+    }
+    final files = form['files'];
+    if (files is List) {
+      for (final f in files) {
+        if (f is! Map) continue;
+        final name = '${f['name'] ?? 'file'}';
+        final filename = f['filename'] == null ? null : '${f['filename']}';
+        dio.MultipartFile? mf;
+        if (f['path'] != null) {
+          final p = '${f['path']}';
+          if (File(p).existsSync()) {
+            mf = dio.MultipartFile.fromFileSync(p, filename: filename ?? p.split('/').last);
+          }
+        } else if (f['base64'] != null) {
+          try {
+            mf = dio.MultipartFile.fromBytes(base64.decode('${f['base64']}'),
+                filename: filename ?? 'blob');
+          } catch (_) {}
+        } else if (f['text'] != null) {
+          mf = dio.MultipartFile.fromString('${f['text']}', filename: filename);
+        }
+        if (mf != null) fd.files.add(MapEntry(name, mf));
+      }
+    }
+    return fd;
   }
 
   /// 建立 WebSocket 连接; 存活期间可 ws_send / 收到 on_message, 关闭时 on_close。

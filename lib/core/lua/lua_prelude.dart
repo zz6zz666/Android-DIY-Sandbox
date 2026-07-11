@@ -60,9 +60,12 @@ function host.sheet(spec) return __host_call("sheet", spec) end
 
 -- ==================== 网络 (通用, 供任意 Lua 玩具/AI 交互使用) ====================
 -- host.http{ url=, method="GET", headers={}, body=, stream=false, timeout=,
+--   response_type="text"|"bytes",  -- bytes: res.body 为 base64 (下载图片/音频)
+--   body_base64=,                   -- 上传二进制 (base64)
+--   form={ fields={k=v}, files={ {name=,path=|base64=|text=,filename=,content_type=} } }, -- multipart 上传
 --   on_response=function(status, headers) end,
 --   on_chunk=function(text) end,          -- 仅 stream=true 时逐块回调
---   on_done=function(res) end,            -- res={status,ok,headers,body}
+--   on_done=function(res) end,            -- res={status,ok,headers,body[,is_base64]}
 --   on_error=function(err) end }
 -- 返回句柄 id; host.http_cancel(id) 取消在途请求。
 function host.http(spec) return __host_call("http", spec or {}) end
@@ -82,6 +85,45 @@ function host.websocket(spec)
   function ws:close(code, reason) return __host_call("ws_close", self.id, code, reason) end
   return ws
 end
+
+-- ==================== DIY 工具箱: 编码/加密/定时/二进制/设备 ====================
+-- 编码 (data 可为字符串或字节数组[0-255]; decode 默认返回文本, 传 true 返回字节数组)
+function host.base64_encode(data) return __host_call("base64_encode", data) end
+function host.base64_decode(s, as_bytes) return __host_call("base64_decode", s, as_bytes) end
+function host.hex_encode(data) return __host_call("hex_encode", data) end
+function host.hex_decode(s, as_bytes) return __host_call("hex_decode", s, as_bytes) end
+-- URL 编码: component=false 时用 encodeFull(保留 /:?&=)
+function host.url_encode(s, component) return __host_call("url_encode", s, component) end
+function host.url_decode(s) return __host_call("url_decode", s) end
+
+-- 哈希 / HMAC (默认输出 hex; 传 b64=true 输出 base64)
+-- algo: "md5" | "sha1" | "sha256" | "sha512"
+function host.hash(algo, data, b64) return __host_call("hash", algo, data, b64) end
+function host.hmac(algo, key, data, b64) return __host_call("hmac", algo, key, data, b64) end
+-- 便捷别名
+function host.md5(data, b64)    return __host_call("hash", "md5", data, b64) end
+function host.sha1(data, b64)   return __host_call("hash", "sha1", data, b64) end
+function host.sha256(data, b64) return __host_call("hash", "sha256", data, b64) end
+function host.sha512(data, b64) return __host_call("hash", "sha512", data, b64) end
+function host.hmac_sha256(key, data, b64) return __host_call("hmac", "sha256", key, data, b64) end
+function host.hmac_sha1(key, data, b64)   return __host_call("hmac", "sha1", key, data, b64) end
+
+-- 随机: random_bytes(n, fmt) fmt="hex"(默认)|"b64"|"raw"(字节数组); uuid() -> v4
+function host.random_bytes(n, fmt) return __host_call("random_bytes", n, fmt) end
+function host.uuid() return __host_call("uuid") end
+
+-- 二进制文件 IO (与 base64 互转; 用于存取 AI 返回的图片/音频等)
+function host.write_bytes(path, b64) return __host_call("write_bytes", path, b64) end
+function host.read_bytes(path) return __host_call("read_bytes", path) end
+
+-- 重复定时器: interval(ms, fn) -> id; clear_interval(id) 停止
+function host.interval(ms, cb) return __host_call("interval", ms, cb) end
+function host.clear_interval(id) return __host_call("clear_interval", id) end
+
+-- 设备/应用信息: { platform, osVersion, locale, screenW, screenH, dpr, darkMode,
+--   appVersion, buildNumber, packageName, model, brand, sdkInt, ... }
+-- (型号/版本首次调用异步补齐, 下次调用即完整)
+function host.device_info() return __host_call("device_info") end
 
 -- ==================== 反应式状态 ====================
 -- local s = state("key", default); s.get(); s.set(v)  -- set 会触发本页重建
