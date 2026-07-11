@@ -28,6 +28,9 @@ class _SettingsPageState extends State<SettingsPage> {
   // 存储从GitHub API获取的原始下载URL
   String? _originalDownloadUrl;
 
+  // 检查更新: 用户点击遮罩任意处可取消 (置 true 后遍历循环立即中止)
+  bool _updateCancelled = false;
+
   @override
   void initState() {
     super.initState();
@@ -128,7 +131,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _isBatteryOptimizationIgnored = status.isGranted;
       });
     } catch (e) {
-      Log.e('检查电池优化豁免状态失败: $e', tag: 'AstrBot');
+      Log.e('检查电池优化豁免状态失败: $e', tag: 'Sandbox');
     }
   }
 
@@ -174,7 +177,7 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       }
     } catch (e) {
-      Log.e('请求电池优化豁免失败: $e', tag: 'AstrBot');
+      Log.e('请求电池优化豁免失败: $e', tag: 'Sandbox');
       Get.snackbar(
         '请求失败',
         '请求电池优化豁免时发生错误: $e',
@@ -191,10 +194,33 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       // 每次检查更新时重置原始URL
       _originalDownloadUrl = null;
+      _updateCancelled = false;
 
-      // 显示加载提示
+      // 显示可取消的加载遮罩: 点击任意位置终止检查并退出遮罩
       Get.dialog(
-        const Center(child: CircularProgressIndicator()),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            _updateCancelled = true;
+            if (Get.isDialogOpen ?? false) Get.back();
+          },
+          child: Container(
+            color: Colors.black54,
+            alignment: Alignment.center,
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 14),
+                Text(
+                  '检查更新中…\n点击任意位置取消',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ),
         barrierDismissible: false,
       );
 
@@ -202,33 +228,35 @@ class _SettingsPageState extends State<SettingsPage> {
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
 
-      // 使用镜像源获取最新版本信息
+      // 版本信息获取: 先 GitHub 直连, 再依次回退各镜像源
       final mirrors = [
+        '${Config.githubApi}${Config.githubReleasesPath}',
         ...Config.githubApiMirrors.map((mirror) =>
             '$mirror/${Config.githubApi}${Config.githubReleasesPath}'),
-        '${Config.githubApi}${Config.githubReleasesPath}',
       ];
 
       Map<String, dynamic>? releaseData;
 
       for (final mirror in mirrors) {
+        if (_updateCancelled) return; // 用户已取消, 遮罩已关闭
         try {
           final response = await http.get(
             Uri.parse(mirror),
             headers: {'Accept': 'application/vnd.github.v3+json'},
-          ).timeout(const Duration(seconds: 10));
+          ).timeout(const Duration(seconds: 8));
 
           if (response.statusCode == 200) {
             releaseData = jsonDecode(response.body) as Map<String, dynamic>;
             break;
           }
         } catch (e) {
-          Log.w('镜像源 $mirror 请求失败: $e', tag: 'AstrBot');
+          Log.w('镜像源 $mirror 请求失败: $e', tag: 'Sandbox');
           continue;
         }
       }
 
-      Get.back(); // 关闭加载提示
+      if (_updateCancelled) return; // 取消: 不再弹任何结果
+      if (Get.isDialogOpen ?? false) Get.back(); // 关闭加载遮罩
 
       if (releaseData == null) {
         Get.snackbar(
@@ -259,8 +287,9 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       }
     } catch (e) {
-      Get.back(); // 关闭加载提示
-      Log.e('检查更新失败: $e', tag: 'AstrBot');
+      if (_updateCancelled) return;
+      if (Get.isDialogOpen ?? false) Get.back(); // 关闭加载遮罩
+      Log.e('检查更新失败: $e', tag: 'Sandbox');
       Get.snackbar(
         '检查失败',
         '检查更新时发生错误: $e',
@@ -415,73 +444,17 @@ class _SettingsPageState extends State<SettingsPage> {
           '${Config.githubDownloadBase}/$tagName/$apkFileName';
     }
 
-    // 使用原始URL构建各个镜像源的下载链接
-    final sources = [
+    // 使用原始URL构建各个镜像源的下载链接 (GitHub 直连 + 各镜像)
+    final sources = <Map<String, String>>[
+      {'name': 'GitHub 原始链接', 'url': _originalDownloadUrl!},
       ...Config.downloadMirrors.map((mirror) => {
             'name': mirror['name']!,
-            'icon':
-                mirror['icon'] == 'speed' ? Icons.speed : Icons.cloud_download,
             'url': '${mirror['url']}/$_originalDownloadUrl',
           }),
-      {
-        'name': 'GitHub原始链接',
-        'icon': Icons.cloud_download,
-        'url': _originalDownloadUrl!,
-        'description': '直接从GitHub官方服务器下载，速度可能较慢',
-      },
     ];
 
-    Get.dialog(
-      AlertDialog(
-        title: const Text('选择下载源'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '请选择适合您网络环境的下载源',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-            ),
-            const SizedBox(height: 16),
-            ...sources.map((source) {
-              return ListTile(
-                leading: Icon(source['icon'] as IconData),
-                title: Text(source['name'] as String),
-                subtitle: source['description'] != null
-                    ? Text(
-                        source['description'] as String,
-                        style: const TextStyle(fontSize: 12),
-                      )
-                    : null,
-                onTap: () async {
-                  final url = source['url'] as String;
-                  final uri = Uri.parse(url);
-
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    Get.back();
-                  } else {
-                    Get.snackbar(
-                      '打开失败',
-                      '无法打开浏览器',
-                      snackPosition: SnackPosition.BOTTOM,
-                      backgroundColor: Colors.red,
-                      colorText: Colors.white,
-                    );
-                  }
-                },
-              );
-            }),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back(),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
-    );
+    // 与 Lua 侧一致的镜像测速弹窗: 测速排序, 点击项跳外部浏览器下载
+    Get.dialog(_DownloadMirrorDialog(sources: sources));
   }
 
   // 执行备份操作
@@ -491,7 +464,7 @@ class _SettingsPageState extends State<SettingsPage> {
       // authority: 当前应用包名.documents
       // rootId: ubuntu_root
       final packageName =
-          RuntimeEnvir.packageName ?? 'com.astrbot.astrbot_bubble';
+          RuntimeEnvir.packageName ?? 'com.diysandbox.android';
       final contentUri = Uri.parse(
         'content://$packageName.documents/root/ubuntu_root',
       );
@@ -504,7 +477,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
         Get.snackbar(
           '已打开',
-          '已在文件管理器中打开 AstrBot Ubuntu 文件系统',
+          '已在文件管理器中打开 Sandbox Ubuntu 文件系统',
           snackPosition: SnackPosition.BOTTOM,
           duration: const Duration(seconds: 2),
         );
@@ -523,7 +496,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'AstrBot Ubuntu',
+                  'Sandbox Ubuntu',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -532,7 +505,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  '你可以手动打开系统"文件"应用，在侧栏中找到"AstrBot Ubuntu"来访问。',
+                  '你可以手动打开系统"文件"应用，在侧栏中找到"Sandbox Ubuntu"来访问。',
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
                 const SizedBox(height: 8),
@@ -575,7 +548,7 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       }
     } catch (e) {
-      Log.e('打开文件管理器失败: $e', tag: 'AstrBot');
+      Log.e('打开文件管理器失败: $e', tag: 'Sandbox');
       Get.snackbar(
         '打开失败',
         '无法打开文件管理器: $e',
@@ -794,7 +767,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return ListTile(
       leading: const Icon(Icons.exit_to_app, color: Colors.red),
       title: const Text('退出应用', style: TextStyle(color: Colors.red)),
-      subtitle: const Text('退出 AstrBot 应用'),
+      subtitle: const Text('退出 Android DIY Sandbox'),
       onTap: () async {
         final confirm = await Get.dialog<bool>(
           AlertDialog(
@@ -821,4 +794,139 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ignore: unused_element
+}
+
+/// 下载镜像测速弹窗 (与 Lua 侧一致): 对每个镜像的下载 URL 测速排序,
+/// 点击某项跳转外部浏览器进行下载。
+class _DownloadMirrorDialog extends StatefulWidget {
+  final List<Map<String, String>> sources; // {name, url}
+  const _DownloadMirrorDialog({required this.sources});
+
+  @override
+  State<_DownloadMirrorDialog> createState() => _DownloadMirrorDialogState();
+}
+
+class _DownloadMirrorDialogState extends State<_DownloadMirrorDialog> {
+  // url -> 延迟毫秒; null=测速中; -1=失败
+  final Map<String, int?> _ms = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _testAll();
+  }
+
+  void _testAll() {
+    for (final s in widget.sources) {
+      final url = s['url']!;
+      _ms[url] = null;
+      _testOne(url);
+    }
+    setState(() {});
+  }
+
+  Future<void> _testOne(String url) async {
+    final sw = Stopwatch()..start();
+    try {
+      // 取前 1KB 测速; 跟随代理重定向, 反映端到端可达速度
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {'Range': 'bytes=0-1023'},
+      ).timeout(const Duration(seconds: 10));
+      sw.stop();
+      final ok = resp.statusCode >= 200 && resp.statusCode < 400;
+      if (mounted) setState(() => _ms[url] = ok ? sw.elapsedMilliseconds : -1);
+    } catch (_) {
+      if (mounted) setState(() => _ms[url] = -1);
+    }
+  }
+
+  List<Map<String, String>> get _sorted {
+    final list = [...widget.sources];
+    list.sort((a, b) {
+      final ma = _ms[a['url']] ?? 1 << 30; // 测速中沉底
+      final mb = _ms[b['url']] ?? 1 << 30;
+      final va = ma < 0 ? (1 << 29) : ma; // 失败置于测速中之前、有效值之后
+      final vb = mb < 0 ? (1 << 29) : mb;
+      return va.compareTo(vb);
+    });
+    return list;
+  }
+
+  Widget _status(String url) {
+    final v = _ms[url];
+    if (v == null) {
+      return const SizedBox(
+        width: 16, height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+    if (v < 0) {
+      return const Text('失败', style: TextStyle(fontSize: 12, color: Colors.red));
+    }
+    final color = v < 800
+        ? Colors.green
+        : (v < 2000 ? Colors.orange : Colors.grey);
+    return Text('$v ms',
+        style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.bold));
+  }
+
+  Future<void> _pick(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      Get.back();
+    } else {
+      Get.snackbar('打开失败', '无法打开浏览器',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.red,
+          colorText: Colors.white);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Expanded(child: Text('下载镜像测速')),
+          IconButton(
+            tooltip: '重新测速',
+            icon: const Icon(Icons.refresh),
+            onPressed: _testAll,
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('点选一个镜像, 将跳转外部浏览器下载',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 8),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: _sorted.map((s) {
+                    return ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.cloud_download_outlined),
+                      title: Text(s['name']!),
+                      trailing: _status(s['url']!),
+                      onTap: () => _pick(s['url']!),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Get.back(), child: const Text('取消')),
+      ],
+    );
+  }
 }

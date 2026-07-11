@@ -16,7 +16,7 @@ import 'webview_tab_manager.dart';
 class HomeController extends GetxController {
   // 终端标签页管理器
   late final TerminalTabManager terminalTabManager;
-  // 通用 WebUI 标签页管理器 (无 AstrBot/NapCat 语义)
+  // 通用 WebUI 标签页管理器 (无特定业务语义)
   final WebViewTabManager webViewTabManager = WebViewTabManager();
   // 再次点击当前导航图标的信号: 终端页弹出更多菜单; WebUI 页切换二级浏览器工具栏
   final RxInt terminalMenuSignal = 0.obs;
@@ -29,7 +29,7 @@ class HomeController extends GetxController {
   final RxDouble glassBlurAmount = 0.45.obs;
   final RxDouble topNavGlassOpacity = 0.62.obs;
   final RxDouble statusOverlayOpacity = 0.38.obs;
-  final RxDouble terminalOverlayOpacity = 0.55.obs;
+  final RxDouble terminalOverlayOpacity = 0.65.obs;
   final RxnInt pendingMainTabIndex = RxnInt();
 
   void clearPendingMainTabIndex(int index) {
@@ -220,7 +220,7 @@ class HomeController extends GetxController {
 
   Future<void> runShellCommand(String command) => _runUbuntuShell(command);
 
-  /// 供 Lua 脚本调用: 某 NapCat 实例是否正在运行 (有活动 Pty)。
+  /// 供 Lua 脚本调用: 某 key 对应的实例是否正在运行 (有活动 Pty)。
   Future<void> ensureContainerScripts() async {
     Directory(RuntimeEnvir.tmpPath).createSync(recursive: true);
     Directory(RuntimeEnvir.homePath).createSync(recursive: true);
@@ -235,8 +235,6 @@ class HomeController extends GetxController {
         ubuntuAssetFile.path,
       );
     }
-    await AssetsUtils.copyAssetToPath(
-        'assets/cmd_config.json', '${RuntimeEnvir.homePath}/cmd_config.json');
     final appVersion = await getAppVersion();
     File('${RuntimeEnvir.homePath}/common.sh').writeAsStringSync(
       _toUnixLineEndings(getCommonScript(appVersion)),
@@ -259,7 +257,7 @@ class HomeController extends GetxController {
     );
   }
 
-  /// 通用 spawn 运行态跟踪 (无 AstrBot/NapCat 语义, 按调用方给的 key)。
+  /// 通用 spawn 运行态跟踪 (按调用方给的 key)。
   final RxInt spawnRevision = 0.obs;
   final Map<String, bool> spawnRunning = {};
   final Map<String, String> _spawnTabIds = {};
@@ -282,12 +280,14 @@ class HomeController extends GetxController {
   }) async {
     await ensureContainerScripts();
     const marker = '__SPAWN_DONE__';
+    // 进入 ubuntu 后先 clear 清掉 install_ubuntu / proot 登录的 bootstrap 噪声,
+    // 再跑真正的命令 (clear 作为 login_ubuntu 命令的第一句, 在 ubuntu 内执行)。
+    final cleaned = 'clear\n$command';
     final tabId = await terminalTabManager.addCommandTerminalTab(
       title: title,
       command: 'source ${RuntimeEnvir.homePath}/common.sh\n'
           'install_ubuntu\n'
-          'copy_config\n'
-          'login_ubuntu ${_shellSingleQuote(command)}\n'
+          'login_ubuntu ${_shellSingleQuote(cleaned)}\n'
           'echo $marker\n',
       onDoneMarker: marker,
       onCommandDone: () {
@@ -315,7 +315,6 @@ class HomeController extends GetxController {
     final n = terminalTabManager.tabs.length + 1;
     final cmd = 'source ${RuntimeEnvir.homePath}/common.sh\n'
         'install_ubuntu\n'
-        'copy_config\n'
         "login_ubuntu 'bash'\n"
         'clear\n';
     await terminalTabManager.addCommandTerminalTab(title: '终端 $n', command: cmd);

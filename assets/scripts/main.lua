@@ -1,160 +1,171 @@
--- 泡泡版 · 默认脚本 (位于 {configPath}/scripts/main.lua, 可直接编辑, 主页顶栏刷新键重载)
--- API 详见同目录 AGENTS.md
+-- Android DIY Sandbox · 默认演示皮肤 (main.lua)
+--
+-- 本 App 是一个"空壳 Lua 运行时": 导航栏、每个页面、主页顶栏按钮、对话框、内嵌小游戏,
+-- 全部由本目录下的 Lua 脚本声明式定义。改脚本即改 App, 无需重新编译。
+-- 完整 API 见同目录 AGENTS.md。改完 → 主页顶栏刷新键 或 `bash agent/sandbox reload` 生效。
+--
+-- 这套默认皮肤演示沙盒的核心能力:
+--   · UI 组件画廊   (画廊)
+--   · 网络 HTTP/WS  (网络)
+--   · 文件与存储     (文件)
+--   · love2d 游戏    (游戏)
+-- 另含 opencode (沙盒自带 AI Agent 能力) 的环境安装入口, 顶栏右侧 (设置齿轮左边)
+-- 两枚按钮来自受保护的 agent/main.lua (改崩 main.lua 也不影响)。
 
--- 独立 agent 模块 (opencode 引擎: 安装/启动/WebUI 托管), 界面在本文件编排
-local agent = require("agent")
+local agent = require("agent")   -- opencode 引擎: 安装 / 启动 / WebUI 托管
 
--- 持久化: 底表初始化 (数据在 app 重启后依然保留)
-do
-  local db = store.open("runner")
-  db.exec[[CREATE TABLE IF NOT EXISTS hiscore(id INTEGER PRIMARY KEY, score INT NOT NULL, at TEXT NOT NULL)]]
-end
-
--- 端口管理: 纯 Lua, 基于通用设置存储 host.get/set (无 Dart 特定端口逻辑)
-local ports = {
-  key = { dashboard = "astrbot_dashboard_port", onebot = "astrbot_onebot_ws_port", napcat = "napcat_webui_port" },
-  def = { dashboard = 6185, onebot = 6199, napcat = 6099 },
-}
-function ports.get(name)
-  local v = tonumber(host.get(ports.key[name]))
-  if v and v >= 1024 and v <= 65535 then return v end
-  return ports.def[name]
-end
-function ports.set(name, v) host.set(ports.key[name], v) end
+-- 导航页索引 (host.nav.go 用)
+local TAB = { home = 0, gallery = 1, network = 2, files = 3, games = 4, webui = 5, terminal = 6 }
 
 nav.tabs({
-  { title = "主页",  icon = "home_outlined",     page = "home" },
-  { title = "WebUI", icon = "language", page = webview() },
-  { title = "终端",  icon = "terminal", page = terminal() },
-  { title = "游戏",  icon = "sports_esports",  page = "game_full" },
-  { title = "动态",  icon = "dashboard_customize_outlined", page = "dynamic_apps" },
+  { title = "主页",  icon = "home_outlined",          page = "home" },
+  { title = "画廊",  icon = "widgets_outlined",        page = "gallery" },
+  { title = "网络",  icon = "cloud_outlined",          page = "network" },
+  { title = "文件",  icon = "folder_open_outlined",    page = "files" },
+  { title = "游戏",  icon = "sports_esports_outlined", page = "games" },
+  { title = "WebUI", icon = "language",                page = webview() },
+  { title = "终端",  icon = "terminal",                page = terminal() },
 })
 
--- GitHub 代理选项
-local PROXIES = {
-  { label = "自动测试",     value = "auto" },
-  { label = "直连 GitHub",  value = "direct" },
-  { label = "Ghfast",       value = "https://ghfast.top" },
-  { label = "Wuliya",       value = "https://gh.wuliya.xin" },
-  { label = "GH Proxy",     value = "https://gh-proxy.com" },
-  { label = "Moeyy",        value = "https://github.moeyy.xyz" },
+-- ============================================================
+-- opencode / Ubuntu 环境安装 (沙盒自带 Agent 能力所需)
+-- 三步: 基础命令 (sudo/git/curl) / uv / opencode
+-- ============================================================
+local GH_PROXIES = {
+  { label = "直连 (GitHub 原始)", value = "direct" },
+  { label = "Ghfast",     value = "https://ghfast.top" },
+  { label = "Gh-Proxy",   value = "https://gh-proxy.com" },
+  { label = "GhProxyNet", value = "https://ghproxy.net" },
+  { label = "GhProxyCc",  value = "https://ghproxy.cc" },
+  { label = "Dpik",       value = "https://gh.dpik.top" },
+  { label = "Monlor",     value = "https://gh.monlor.com" },
+  { label = "Chjina",     value = "https://gh.chjina.com" },
+  { label = "BokiMoe",    value = "https://github.boki.moe" },
+  { label = "JasonZeng",  value = "https://gh.jasonzeng.dev" },
+  { label = "GeekerTao",  value = "https://gh.geekertao.top" },
+  { label = "Nxnow",      value = "https://gh.nxnow.top" },
+  { label = "Npee",       value = "https://down.npee.cn" },
 }
-
--- 环境安装状态: 用通用积木 host.exists 在 Lua 侧判断
-local function env_installed(step)
-  local ub = host.ubuntu_path()
-  if step == "base" then
-    return host.exists(ub .. "/usr/bin/git") and host.exists(ub .. "/usr/bin/curl") and host.exists(ub .. "/usr/bin/sudo")
-  elseif step == "uv" then
-    return host.exists(ub .. "/root/.local/bin/uv")
-  elseif step == "napcat" then
-    return host.exists(ub .. "/root/launcher.sh") and host.exists(ub .. "/root/napcat")
-  elseif step == "astrbot" then
-    return host.exists(ub .. "/root/AstrBot/main.py") and host.exists(ub .. "/root/AstrBot/.venv")
-  elseif step == "opencode" then
-    return agent.installed()
-  end
-  return false
+local function gh_proxy() return host.get("environment_github_proxy") or "direct" end
+local function gh_proxy_label(v)
+  for _, p in ipairs(GH_PROXIES) do if p.value == v then return p.label end end
+  return v
 end
 
-local ENV_STEPS = {
-  { id = "base",    title = "基础命令", sub = "sudo / git / curl" },
-  { id = "uv",      title = "uv",       sub = "Python 依赖管理工具" },
-  { id = "astrbot", title = "AstrBot",  sub = "克隆 AstrBot 并同步依赖" },
-  { id = "napcat",  title = "NapCat",   sub = "安装或修复 NapCatQQ" },
-  { id = "opencode", title = "OpenCode", sub = "DIY AI coding agent" },
-}
+-- 镜像测速 (纯 Lua 端): value -> { ms=数字 | err=字符串 | testing=true }
+local gh_speed = {}
+local GH_TEST_PATH = "/https://raw.githubusercontent.com/astral-sh/uv/main/README.md"
+local function gh_test_all()
+  local rev = state("gh.speed.rev", 0)
+  for _, p in ipairs(GH_PROXIES) do
+    if p.value ~= "direct" then
+      gh_speed[p.value] = { testing = true }
+      local t0 = host.now_ms()
+      host.http({
+        url = p.value .. GH_TEST_PATH, method = "GET", timeout = 10,
+        on_done = function(res)
+          if res and res.ok then
+            gh_speed[p.value] = { ms = host.now_ms() - t0 }
+          else
+            gh_speed[p.value] = { err = "HTTP " .. tostring(res and res.status or "?") }
+          end
+          rev.set(rev.get() + 1)
+        end,
+        on_error = function() gh_speed[p.value] = { err = "失败" }; rev.set(rev.get() + 1) end,
+      })
+    end
+  end
+  rev.set(rev.get() + 1)
+end
+-- 直连置顶, 其余按延迟升序 (未测/失败沉底)
+local function gh_sorted()
+  local list = {}
+  for _, p in ipairs(GH_PROXIES) do list[#list + 1] = p end
+  table.sort(list, function(a, b)
+    if a.value == "direct" then return true end
+    if b.value == "direct" then return false end
+    local sa, sb = gh_speed[a.value], gh_speed[b.value]
+    local ma = (sa and sa.ms) or math.huge
+    local mb = (sb and sb.ms) or math.huge
+    if ma ~= mb then return ma < mb end
+    return a.label < b.label
+  end)
+  return list
+end
+local function gh_status_widget(p)
+  if p.value == "direct" then return text("默认", { size = 12, color = "grey" }) end
+  local s = gh_speed[p.value]
+  if not s or s.testing then
+    return row({ spinner({ size = 14 }), spacer(6), text("测速中", { size = 12, color = "grey" }) }, { cross = "center" })
+  elseif s.ms then
+    local col = s.ms < 800 and "green" or (s.ms < 2000 and "orange" or "grey")
+    return text(s.ms .. " ms", { size = 12, color = col, weight = "bold" })
+  else
+    return text(s.err or "失败", { size = 12, color = "red" })
+  end
+end
+local function open_gh_dialog()
+  gh_test_all()
+  host.dialog({
+    title = "GitHub 代理测速",
+    build = function()
+      local rows = {
+        row({
+          expanded(text("点选一个镜像作为下载代理", { size = 12, color = "grey" })),
+          button("重新测速", gh_test_all, { variant = "text", icon = "refresh" }),
+        }, { cross = "center" }),
+        divider(),
+      }
+      for _, p in ipairs(gh_sorted()) do
+        local sel = gh_proxy() == p.value
+        rows[#rows + 1] = tile(p.label, {
+          icon = sel and "radio_button_checked" or "radio_button_unchecked",
+          trailing = gh_status_widget(p),
+          onTap = function()
+            host.set("environment_github_proxy", p.value)
+            host.close_dialog()
+            host.toast("已选择: " .. p.label)
+          end,
+        })
+      end
+      return box({ height = 400, child = scroll({ column(rows) }) })
+    end,
+    actions = { { label = "关闭", variant = "text" } },
+  })
+end
 
--- ============================================================
--- 安装命令: 每个按钮直接下发自己那一步的命令 (无中央分发器)。
--- 共享的辅助函数 (progress/network/各 install_*) 作为 verbatim 常量复用,
--- 每个步骤按钮显式列出自己要执行的调用序列。
--- ============================================================
+-- 选中代理时给下载 URL 加前缀 (direct 则直接 github.com)
+local function gh_prefix(url)
+  local p = gh_proxy()
+  if p == "direct" or p == "auto" then return url end
+  return p .. "/" .. url
+end
 
--- 进容器执行时需要的环境变量前缀
-local function env_pre(force)
+local function env_pre()
   return table.concat({
     'export TMPDIR="' .. host.tmp_path() .. '"',
-    'export ASTRBOT_DASHBOARD_PORT=' .. tostring(ports.get("dashboard")),
-    'export ASTRBOT_ONEBOT_WS_PORT=' .. tostring(ports.get("onebot")),
-    'export ASTRBOT_GITHUB_PROXY="' .. (host.get("environment_github_proxy") or "auto") .. '"',
-    'export ASTRBOT_FORCE_REINSTALL_STEP="' .. (force or "") .. '"',
+    'export SANDBOX_GITHUB_PROXY="' .. gh_proxy() .. '"',
     'export L_NOT_INSTALLED=未安装',
     'export L_INSTALLING=安装中',
     'export L_INSTALLED=已安装',
     'export UV_LINK_MODE=copy',
     'export UV_DEFAULT_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"',
-    'export UV_PYTHON_INSTALL_MIRROR="https://ghfast.top/https://github.com/astral-sh/python-build-standalone/releases/download"',
+    'export UV_PYTHON_INSTALL_MIRROR="' ..
+      gh_prefix("https://github.com/astral-sh/python-build-standalone/releases/download") .. '"',
   }, "\n")
 end
 
--- 共享辅助 (verbatim)
 local SH_HELPERS = [==[
-progress_echo(){
-  echo -e "\033[31m- $@\033[0m"
-  echo "$@" > "$TMPDIR/progress_des"
-}
-prepare_reinstall_step(){
-  case "$1" in
-    uv)
-      progress_echo "uv 重装准备中"
-      rm -f "$HOME/.local/bin/uv" "$HOME/.local/bin/uvx"
-      ;;
-    napcat)
-      progress_echo "NapCat 重装准备中"
-      if [ -d "$HOME/napcat/config" ]; then
-        rm -rf "$HOME/napcat_config_backup"
-        cp -r "$HOME/napcat/config" "$HOME/napcat_config_backup"
-      fi
-      pkill -f 'qq --no-sandbox' 2>/dev/null || true
-      pkill -f 'NapCat' 2>/dev/null || true
-      pkill -f 'napcat' 2>/dev/null || true
-      rm -rf "$HOME/napcat" "$HOME/napcat.sh" "$HOME/launcher.sh"
-      ;;
-    astrbot)
-      progress_echo "AstrBot 重装准备中"
-      killall uv 2>/dev/null || true
-      rm -rf "$HOME/AstrBot_data_reinstall_backup"
-      if [ -d "$HOME/AstrBot/data" ]; then
-        cp -r "$HOME/AstrBot/data" "$HOME/AstrBot_data_reinstall_backup"
-      fi
-      rm -rf "$HOME/AstrBot" "$HOME/AstrBot_tmp"
-      ;;
-  esac
-}
-maybe_prepare_reinstall(){
-  if [ "$ASTRBOT_FORCE_REINSTALL_STEP" = "$1" ]; then
-    prepare_reinstall_step "$1"
-  fi
-}
+progress_echo(){ echo -e "\033[31m- $@\033[0m"; echo "$@" > "$TMPDIR/progress_des"; }
 ]==]
 
 local SH_NET = [==[
 network_test() {
-    local timeout=10
-    local status=0
-    local found=0
-    target_proxy=""
-    echo "开始网络测试: Github..."
-    if [ "$ASTRBOT_GITHUB_PROXY" = "direct" ]; then
-        echo "已选择 Github 直连"; target_proxy=""; return 0
-    fi
-    if [ -n "$ASTRBOT_GITHUB_PROXY" ] && [ "$ASTRBOT_GITHUB_PROXY" != "auto" ]; then
-        target_proxy="$ASTRBOT_GITHUB_PROXY"; echo "已选择 Github 代理: $target_proxy"; return 0
-    fi
-    proxy_arr=("https://ghfast.top" "https://gh.wuliya.xin" "https://gh-proxy.com" "https://github.moeyy.xyz")
-    check_url="https://raw.githubusercontent.com/NapNeko/NapCatQQ/main/package.json"
-    for proxy in "${proxy_arr[@]}"; do
-        echo "测试代理: ${proxy}"
-        status=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout*2)) -o /dev/null -s -w "%{http_code}" "${proxy}/${check_url}")
-        if [ $? -ne 0 ]; then echo "代理 ${proxy} 测试失败或超时"; continue; fi
-        if [ "${status}" = "200" ]; then found=1; target_proxy="${proxy}"; echo "将使用Github代理: ${proxy}"; break; fi
-    done
-    if [ ${found} -eq 0 ]; then
-        echo "警告: 无法找到可用的Github代理，将尝试直连..."
-        status=$(curl -k --connect-timeout ${timeout} --max-time $((timeout*2)) -o /dev/null -s -w "%{http_code}" "${check_url}")
-        if [ $? -eq 0 ] && [ "${status}" = "200" ]; then echo "直连Github成功"; target_proxy=""; else echo "警告: 无法连接 Github，将继续尝试安装。"; fi
-    fi
+  target_proxy=""
+  case "$SANDBOX_GITHUB_PROXY" in
+    ""|direct|auto) echo "Github 直连"; return 0 ;;
+    *) target_proxy="$SANDBOX_GITHUB_PROXY"; echo "使用代理: $target_proxy"; return 0 ;;
+  esac
 }
 ]==]
 
@@ -168,11 +179,8 @@ install_sudo_curl_git(){
   progress_echo "基础命令缺失: ${missing[*]}, 开始安装..."
   export DEBIAN_FRONTEND=noninteractive
   apt_opts="-o Acquire::ForceIPv4=true"
-  if ! apt-get $apt_opts update; then echo "apt-get update 失败，继续尝试安装..."; fi
+  apt-get $apt_opts update || echo "apt-get update 失败, 继续尝试..."
   if ! apt-get $apt_opts install -y sudo git curl; then echo "基础命令安装失败"; return 1; fi
-  for cmd in sudo git curl; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then echo "基础命令安装后仍缺少: $cmd"; return 1; fi
-  done
   progress_echo "基础命令安装完成"
 }
 ]==]
@@ -180,1324 +188,841 @@ install_sudo_curl_git(){
 local SH_UV = [==[
 install_uv(){
   INSTALL_DIR="$HOME/.local/bin"
-  if [ ! -x "$INSTALL_DIR/uv" ]; then
-    progress_echo "uv $L_NOT_INSTALLED，$L_INSTALLING..."
-    network_test
-    APP_NAME="uv"
-    APP_VERSION="0.9.9"
-    ARCHIVE_FILE="uv-aarch64-unknown-linux-gnu.tar.gz"
-    DOWNLOAD_URL="${target_proxy:+${target_proxy}/}https://github.com/astral-sh/uv/releases/download/${APP_VERSION}/${ARCHIVE_FILE}"
-    for cmd in tar mkdir cp chmod mktemp rm curl; do
-      if ! command -v $cmd >/dev/null 2>&1; then echo "错误：缺少必要命令 $cmd"; exit 1; fi
-    done
-    mkdir -p $INSTALL_DIR
-    TMP_DIR=$(mktemp -d 2>/dev/null || mktemp -t 'uvtmp.XXXXXX')
-    if [ -z "$TMP_DIR" ]; then echo "创建临时目录失败"; exit 1; fi
-    mkdir -p "$TMP_DIR"
-    TMP_ARCHIVE="$TMP_DIR/$ARCHIVE_FILE"
-    echo "正在下载 $APP_NAME $APP_VERSION..."
-    if ! curl -fL $DOWNLOAD_URL -o $TMP_ARCHIVE; then echo "下载失败"; rm -rf $TMP_DIR; exit 1; fi
-    echo "正在解压 $APP_NAME..."
-    if ! tar -C "$TMP_DIR" -xf "$TMP_ARCHIVE" --strip-components 1; then echo "解压失败"; rm -rf $TMP_DIR; exit 1; fi
-    cp $TMP_DIR/uv $TMP_DIR/uvx $INSTALL_DIR/
-    chmod +x $INSTALL_DIR/uv $INSTALL_DIR/uvx
-    if ! grep -q "$INSTALL_DIR" $HOME/.bashrc; then
-      echo "export PATH=$INSTALL_DIR:\$PATH" >> $HOME/.bashrc
-      source $HOME/.bashrc
-      echo "已自动配置 $APP_NAME 路径到环境变量"
+  ARCHIVE_FILE="uv-aarch64-unknown-linux-gnu.tar.gz"
+  mkdir -p "$INSTALL_DIR"
+  network_test
+
+  # 探测最新版本: 走 releases/latest 的 302 重定向, 取最终 URL 末段 tag (无需 api.github.com)
+  progress_echo "检测 uv 最新版本..."
+  LATEST_URL=$(curl -fsSL -o /dev/null -w '%{url_effective}' "${target_proxy:+${target_proxy}/}https://github.com/astral-sh/uv/releases/latest" 2>/dev/null)
+  APP_VERSION="${LATEST_URL##*/}"
+  case "$APP_VERSION" in
+    ""|*latest*) APP_VERSION="0.9.9"; echo "无法获取最新版本, 回退到 $APP_VERSION" ;;
+    *) echo "最新 uv 版本: $APP_VERSION" ;;
+  esac
+
+  # 未强制重装, 且已安装同版本 -> 跳过
+  if [ "${UV_REINSTALL:-}" != "1" ] && [ -x "$INSTALL_DIR/uv" ]; then
+    CUR=$("$INSTALL_DIR/uv" --version 2>/dev/null | awk '{print $2}')
+    if [ -n "$CUR" ] && [ "$CUR" = "$APP_VERSION" ]; then
+      progress_echo "uv 已是最新 ($CUR)"
+      return 0
     fi
-    rm -rf $TMP_DIR
-  else
-    progress_echo "uv $L_INSTALLED"
+    echo "当前 uv ${CUR:-未知}, 将更新到 $APP_VERSION..."
   fi
+  [ "${UV_REINSTALL:-}" = "1" ] && { echo "强制重装 uv..."; rm -f "$INSTALL_DIR/uv" "$INSTALL_DIR/uvx"; }
+
+  progress_echo "uv $L_INSTALLING ($APP_VERSION)..."
+  DOWNLOAD_URL="${target_proxy:+${target_proxy}/}https://github.com/astral-sh/uv/releases/download/${APP_VERSION}/${ARCHIVE_FILE}"
+  TMP_DIR=$(mktemp -d)
+  echo "正在下载 uv $APP_VERSION..."
+  if ! curl -fL "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE_FILE"; then echo "下载失败"; rm -rf "$TMP_DIR"; exit 1; fi
+  if ! tar -C "$TMP_DIR" -xf "$TMP_DIR/$ARCHIVE_FILE" --strip-components 1; then echo "解压失败"; rm -rf "$TMP_DIR"; exit 1; fi
+  cp "$TMP_DIR/uv" "$TMP_DIR/uvx" "$INSTALL_DIR/" && chmod +x "$INSTALL_DIR/uv" "$INSTALL_DIR/uvx"
+  grep -q "$INSTALL_DIR" "$HOME/.bashrc" 2>/dev/null || echo "export PATH=$INSTALL_DIR:\$PATH" >> "$HOME/.bashrc"
+  rm -rf "$TMP_DIR"
+  progress_echo "uv 安装完成 ($APP_VERSION)"
 }
 ]==]
 
-local SH_NAPCAT = [==[
-configure_napcat_token_ttl(){
-  if [ -f "$HOME/napcat/napcat.mjs" ]; then
-    sed -i -E "s#static MAX_CREDENTIAL_VALID_SECONDS = [0-9]+#static MAX_CREDENTIAL_VALID_SECONDS = 604800#g" "$HOME/napcat/napcat.mjs"
-    sed -i -E 's#Rp\.set\(`revoked:\$\{r\}`, !0, [0-9]+\)#Rp.set(`revoked:${r}`, !0, 604800)#g' "$HOME/napcat/napcat.mjs"
-  fi
-}
-install_napcat(){
-  if [ ! -f "$HOME/launcher.sh" ]; then
-    progress_echo "Napcat $L_NOT_INSTALLED，$L_INSTALLING..."
-    apt --fix-broken install -y
-    if [ -d "$HOME/napcat/config" ]; then
-      echo "备份 NapCat 配置目录..."
-      cp -r "$HOME/napcat/config" "$HOME/napcat_config_backup"
-    fi
-    rm -rf $HOME/napcat
-    cd $HOME
-    curl -o napcat.sh https://raw.githubusercontent.com/NapNeko/napcat-linux-installer/refs/heads/main/install.sh
-    if ! chmod +x napcat.sh; then echo "设置 napcat.sh 执行权限失败"; exit 1; fi
-    bash napcat.sh
-    pkill -f 'qq --no-sandbox' 2>/dev/null || true
-    pkill -f 'NapCat' 2>/dev/null || true
-    pkill -f 'napcat' 2>/dev/null || true
-    if [ -d "$HOME/napcat_config_backup" ]; then
-      echo "恢复 NapCat 配置目录..."
-      mkdir -p "$HOME/napcat/config"
-      cp -r "$HOME/napcat_config_backup"/* "$HOME/napcat/config/"
-      rm -rf "$HOME/napcat_config_backup"
-    fi
-  if [ ! -f "$HOME/napcat/config/onebot11.json" ]; then
-    echo "写入 onebot11.json 默认配置文件"
-    cat > "$HOME/napcat/config/onebot11.json" <<EOF
-{
-  "network": {
-    "httpServers": [],
-    "httpClients": [],
-    "websocketServers": [],
-    "websocketClients": [
-      {
-        "name": "WsClient",
-        "enable": true,
-        "url": "ws://localhost:${ASTRBOT_ONEBOT_WS_PORT:-6199}/ws",
-        "messagePostFormat": "array",
-        "reportSelfMessage": false,
-        "reconnectInterval": 5000,
-        "token": "kasdkfljsadhlskdjhasdlkfshdlafksjdhf",
-        "debug": false,
-        "heartInterval": 30000
-      }
-    ]
-  },
-  "musicSignUrl": "",
-  "enableLocalFile2Url": false,
-  "parseMultMsg": false
-}
-EOF
-  fi
-fi
-  configure_napcat_token_ttl
-  progress_echo "Napcat $L_INSTALLED"
-}
-]==]
-
-local SH_ASTRBOT = [==[
-install_astrbot(){
-  local INSTALL_DIR="$HOME/AstrBot"
-  local CLONE_TEMP_DIR="$HOME/AstrBot_tmp"
-  local BACKUP_DIR="/sdcard/Download/AstrBotBubble"
-  rm -rf "$CLONE_TEMP_DIR"
-  killall uv 2>/dev/null
-  if [ -d "$INSTALL_DIR" ] && { [ ! -f "$INSTALL_DIR/pyproject.toml" ] || [ ! -f "$INSTALL_DIR/main.py" ]; }; then
-    echo "AstrBot 安装目录不完整，准备重新安装..."
-    rm -rf "$HOME/AstrBot_data_reinstall_backup"
-    if [ -d "$INSTALL_DIR/data" ]; then cp -r "$INSTALL_DIR/data" "$HOME/AstrBot_data_reinstall_backup"; fi
-    rm -rf "$INSTALL_DIR"
-  fi
-  if [ ! -d "$INSTALL_DIR" ]; then
-    cd $HOME
-    progress_echo "AstrBot $L_NOT_INSTALLED，$L_INSTALLING..."
-    echo "正在获取 AstrBot 最新版本..."
-    if [ -n "$CUSTOM_GIT_CLONE" ]; then
-      echo "使用自定义 Git Clone 命令..."
-      if ! eval "$CUSTOM_GIT_CLONE"; then echo "自定义 Git Clone 命令执行失败"; exit 1; fi
-      if [ -d "AstrBot" ]; then mv "AstrBot" "$CLONE_TEMP_DIR"; else echo "错误: 未找到 AstrBot 目录"; exit 1; fi
-    else
-      network_test
-      LATEST_TAG=$(git ls-remote --tags --sort='-v:refname' ${target_proxy:+${target_proxy}/}https://github.com/AstrBotDevs/AstrBot.git | awk -F'/' '{print $3}' | sed 's/\^{}//g' | grep -E '^v?[0-9]+(\.[0-9]+){1,2}$' | head -n 1)
-      if [ -z "$LATEST_TAG" ]; then echo "警告: 无法获取最新 tag，使用 master 分支"; CLONE_BRANCH="master"; else echo "最新正式版: $LATEST_TAG"; CLONE_BRANCH="$LATEST_TAG"; fi
-      echo "正在克隆 AstrBot 仓库，分支/标签: $CLONE_BRANCH..."
-      if ! git clone --depth=1 --branch "$CLONE_BRANCH" ${target_proxy:+${target_proxy}/}https://github.com/AstrBotDevs/AstrBot.git "$CLONE_TEMP_DIR"; then
-        echo "克隆 AstrBot 仓库失败"; rm -rf "$CLONE_TEMP_DIR"; exit 1
-      fi
-    fi
-    mv "$CLONE_TEMP_DIR" "$INSTALL_DIR"
-  else
-    progress_echo "AstrBot $L_INSTALLED"
-  fi
-  progress_echo "AstrBot 初始化中"
-  cd "$INSTALL_DIR"
-  if [ ! -d "$INSTALL_DIR/data" ]; then
-    echo "检测到 data 目录不存在，初始化数据目录..."
-    mkdir "$INSTALL_DIR/data"
-    if [ -d "$HOME/AstrBot_data_reinstall_backup" ]; then
-      echo "恢复重装前 AstrBot 数据..."
-      rm -rf "$INSTALL_DIR/data"
-      mv "$HOME/AstrBot_data_reinstall_backup" "$INSTALL_DIR/data"
-      REINSTALL_PLUGINS_FLAG=1
-    else
-    if [ -d "$BACKUP_DIR" ]; then
-      echo "扫描备份目录: $BACKUP_DIR"
-      LATEST_BACKUP=$(ls -t "$BACKUP_DIR"/AstrBotBubble-backup-*.tar.gz 2>/dev/null | head -n 1)
-      if [ -n "$LATEST_BACKUP" ]; then
-        echo "找到备份文件: $LATEST_BACKUP"
-        if tar -xzf "$LATEST_BACKUP" -C "$INSTALL_DIR"; then
-          echo "备份恢复成功"; REINSTALL_PLUGINS_FLAG=1
-        else
-          echo "备份恢复失败，使用默认配置"
-          cp "$HOME/cmd_config.json" "$INSTALL_DIR/data"; chmod +w "$INSTALL_DIR/data/cmd_config.json"
-        fi
-      else
-        echo "未找到备份文件，使用默认配置"
-        cp "$HOME/cmd_config.json" "$INSTALL_DIR/data"; chmod +w "$INSTALL_DIR/data/cmd_config.json"
-      fi
-    else
-      echo "备份目录不存在，使用默认配置"
-      cp "$HOME/cmd_config.json" "$INSTALL_DIR/data"; chmod +w "$INSTALL_DIR/data/cmd_config.json"
-    fi
-    fi
-    rm -rf "$INSTALL_DIR/.venv"
-  fi
-  if [ ! -d "$INSTALL_DIR/.venv" ] || ! $HOME/.local/bin/uv run --no-sync python -c "import aiohttp" >/dev/null 2>&1; then
-    echo "同步 AstrBot 依赖..."
-    if ! $HOME/.local/bin/uv sync; then echo "依赖同步失败"; exit 1; fi
-    REINSTALL_PLUGINS_FLAG=1
-  fi
-  if [ "$REINSTALL_PLUGINS_FLAG" -eq 1 ]; then
-    echo "检测到重装插件依赖标记，开始重装..."
-    if [ -d "$INSTALL_DIR/data/plugins" ]; then
-      for plugin_dir in "$INSTALL_DIR/data/plugins"/*; do
-        if [ -d "$plugin_dir" ] && [ -f "$plugin_dir/requirements.txt" ]; then
-          echo "安装插件依赖: $(basename "$plugin_dir")..."
-          cd "$INSTALL_DIR"
-          $HOME/.local/bin/uv pip install -r "$plugin_dir/requirements.txt" 2>/dev/null || echo "警告: 插件依赖安装失败，将在启动时重试"
-        fi
-      done
-    fi
-  fi
-  progress_echo "AstrBot 安装完成"
-}
-]==]
-
--- 每个按钮下面就是它自己那一步的命令序列:
-local function step_base(reinstall)
-  host.spawn(env_pre(reinstall and "base" or "") .. "\n" .. SH_HELPERS .. SH_BASE .. [==[
-maybe_prepare_reinstall base
-install_sudo_curl_git
-]==], "基础命令")
-  host.nav.go(2)
-end
-
-local function step_uv(reinstall)
-  host.spawn(env_pre(reinstall and "uv" or "") .. "\n" .. SH_HELPERS .. SH_NET .. SH_BASE .. SH_UV .. [==[
-maybe_prepare_reinstall uv
-install_sudo_curl_git
-install_uv
-]==], "uv")
-  host.nav.go(2)
-end
-
-local function step_napcat(reinstall)
-  host.spawn(env_pre(reinstall and "napcat" or "") .. "\n" .. SH_HELPERS .. SH_BASE .. SH_NAPCAT .. [==[
-maybe_prepare_reinstall napcat
-install_sudo_curl_git
-install_napcat
-]==], "NapCat")
-  host.nav.go(2)
-end
-
-local function step_astrbot(reinstall, force_plugins)
-  local pre = env_pre(reinstall and "astrbot" or "")
-  local flag = force_plugins and "1" or "0"
-  host.spawn(pre .. "\nexport REINSTALL_PLUGINS_FLAG=" .. flag .. "\nCUSTOM_GIT_CLONE=\"\"\n"
-    .. SH_HELPERS .. SH_NET .. SH_BASE .. SH_UV .. SH_ASTRBOT .. [==[
-maybe_prepare_reinstall astrbot
-install_sudo_curl_git
-install_uv
-install_astrbot
-]==], "AstrBot")
-  host.nav.go(2)
-end
-
-local STEP_RUN = {
-  base = step_base,
-  uv = step_uv,
-  napcat = step_napcat,
-  astrbot = step_astrbot,
-  opencode = function(reinstall) agent.install(reinstall) end,
-}
-
--- ============================================================
--- AstrBot 启停: 纯 Lua, 通过通用原语 host.spawn/host.stop, 运行态读 ctx.running
--- 一操作一终端标签页, 手动模式, 无进度/webview 监听
--- ============================================================
-local function astrbot_start_command()
-  return table.concat({
-    "export TMPDIR='" .. host.tmp_path() .. "'",
-    "export ASTRBOT_DASHBOARD_PORT='" .. tostring(ports.get("dashboard")) .. "'",
-    "if [ ! -x /root/.local/bin/uv ] || [ ! -d /root/AstrBot ] || [ ! -f /root/AstrBot/pyproject.toml ] || [ ! -f /root/AstrBot/main.py ] || [ ! -d /root/AstrBot/.venv ]; then echo 'AstrBot 环境未安装完整，请到主页环境管理安装。'; exit 1; fi",
-    "cd /root/AstrBot",
-    "echo 'AstrBot 启动中'",
-    "/root/.local/bin/uv run --no-sync main.py",
-  }, "; ")
-end
-
-function astrbot_toggle(running)
-  if running then
-    host.stop("astrbot")
-  else
-    host.spawn(astrbot_start_command(), "AstrBot", "astrbot")
-    host.nav.go(2)
-  end
-end
-
--- ============================================================
--- NapCat: 实例管理 / 启停 / BOT 绑定 —— 全部纯 Lua
--- 数据存 host.get/set("napcat_instances") (JSON), 配置文件直接读写 rootfs,
--- 启停走 host.spawn/host.stop (key = "napcat:<id>"), 运行态读 ctx.running。
--- Dart 侧不含任何 NapCat 逻辑。
--- ============================================================
-local NC = {}
-local WEBUI_FIRST, WEBUI_LAST = 6099, 6149
-local DISPLAY_FIRST = 22
-local ONEBOT_FIRST, ONEBOT_LAST = 6199, 6249
-local WS_NAME = "WsClient"
-local ONEBOT_TOKEN = "kasdkfljsadhlskdjhasdlkfshdlafksjdhf"
-local INVALID_PORT, INVALID_TOKEN = 6250, "invalid"
-
-local function nc_root() return host.ubuntu_path() .. "/root" end
-local function nc_workdir(id) return nc_root() .. "/napcat_instances/" .. id .. "_napcat" end
-local function nc_configdir(id) return nc_workdir(id) .. "/config" end
-
-local function napcat_x_display()
-  local d, o, n = ports.get("dashboard"), ports.get("onebot"), ports.get("napcat")
-  if d == 6185 and o == 6199 and n == 6099 then return 1 end
-  return 10 + d % 80
-end
-
-function NC.load()
-  local raw = host.get("napcat_instances")
-  if type(raw) == "string" and raw ~= "" then
-    local ok, v = pcall(json.decode, raw)
-    if ok and type(v) == "table" then return v end
-  end
-  return {}
-end
-
-function NC.save(list) host.set("napcat_instances", json.encode(list)) end
-
-function NC.find(list, id)
-  for i, v in ipairs(list) do if v.id == id then return i, v end end
-end
-
--- 从 rootfs 里探测该实例已登录的 QQ (通过 onebot11_<qq>.json 文件名)
-function NC.detect_qq(id)
-  for _, e in ipairs(host.list_dir(nc_configdir(id))) do
-    local qq = tostring(e.name):match("^onebot11_(%d+)%.json$")
-    if qq then return qq end
-  end
-  return nil
-end
-
--- ---------- onebot 配置 ----------
-local function ws_url(port) return "ws://localhost:" .. port .. "/ws" end
-local function ws_port_of(url) return tonumber((tostring(url or "")):match("^wss?://[^/:]+:(%d+)")) end
-
-local function build_onebot_config(port)
-  return {
-    network = {
-      httpServers = {}, httpClients = {}, websocketServers = {},
-      websocketClients = {
-        { name = WS_NAME, enable = true, url = ws_url(port), messagePostFormat = "array",
-          reportSelfMessage = false, reconnectInterval = 5000, token = ONEBOT_TOKEN,
-          debug = false, heartInterval = 30000 },
-      },
-    },
-    musicSignUrl = "", enableLocalFile2Url = false, parseMultMsg = false,
-  }
-end
-
-function NC.ensure_onebot(ins)
-  local p = nc_configdir(ins.id) .. "/onebot11.json"
-  if host.exists(p) then return end
-  host.mkdirs(nc_configdir(ins.id))
-  host.write_file(p, json.encode(build_onebot_config(ins.oneBotPort or ONEBOT_FIRST)))
-end
-
--- 读取该实例当前生效的 onebot 配置 (优先账号文件, 回退模板)
-function NC.read_onebot(id)
-  local qq = NC.detect_qq(id)
-  local paths = {}
-  if qq then paths[#paths + 1] = nc_configdir(id) .. "/onebot11_" .. qq .. ".json" end
-  paths[#paths + 1] = nc_configdir(id) .. "/onebot11.json"
-  for _, p in ipairs(paths) do
-    local t = host.read_file(p)
-    if t then
-      local ok, v = pcall(json.decode, t)
-      if ok and type(v) == "table" then return v, p end
-    end
-  end
-  return nil, nil
-end
-
-function NC.list_clients(id)
-  local cfg = NC.read_onebot(id)
-  local res = {}
-  if not cfg or type(cfg.network) ~= "table" then return res end
-  local clients = cfg.network.websocketClients
-  if type(clients) ~= "table" then return res end
-  for i, c in ipairs(clients) do
-    if type(c) == "table" then
-      local url = tostring(c.url or "")
-      res[#res + 1] = {
-        name = (c.name and c.name ~= "") and c.name or ("websocket " .. i),
-        enabled = c.enable ~= false, url = url,
-        token = tostring(c.token or ""), port = ws_port_of(url),
-      }
-    end
-  end
-  return res
-end
-
--- ---------- AstrBot cmd_config (适配器) ----------
-local function astrbot_config_files()
-  return {
-    host.ubuntu_path() .. "/root/AstrBot/data/cmd_config.json",
-    host.home_path() .. "/cmd_config.json",
-  }
-end
-
-local function read_astrbot_config()
-  for _, f in ipairs(astrbot_config_files()) do
-    local t = host.read_file(f)
-    if t then
-      local ok, v = pcall(json.decode, t)
-      if ok and type(v) == "table" then return v end
-    end
-  end
-  return nil
-end
-
-local function write_astrbot_config(cfg)
-  local wrote = false
-  for _, f in ipairs(astrbot_config_files()) do
-    if host.exists(f) then host.write_file(f, json.encode(cfg)); wrote = true end
-  end
-  if not wrote then host.write_file(astrbot_config_files()[1], json.encode(cfg)) end
-end
-
-function NC.list_adapters()
-  local cfg = read_astrbot_config()
-  local res = {}
-  if not cfg or type(cfg.platform) ~= "table" then return res end
-  for _, item in ipairs(cfg.platform) do
-    if type(item) == "table" and item.type == "aiocqhttp" then
-      res[#res + 1] = {
-        id = tostring(item.id or ""), enabled = item.enable ~= false,
-        port = tonumber(item.ws_reverse_port) or -1,
-        token = tostring(item.ws_reverse_token or ""),
-      }
-    end
-  end
-  return res
-end
-
-local function bound_by_other(list, adapterId, exceptId)
-  for _, v in ipairs(list) do
-    if v.id ~= exceptId and v.boundAdapterId == adapterId then return true end
+local function env_installed(step)
+  local ub = host.ubuntu_path()
+  if step == "base" then
+    return host.exists(ub .. "/usr/bin/git") and host.exists(ub .. "/usr/bin/curl") and host.exists(ub .. "/usr/bin/sudo")
+  elseif step == "uv" then
+    return host.exists(ub .. "/root/.local/bin/uv")
+  elseif step == "opencode" then
+    return agent.installed()
   end
   return false
 end
 
-local function unique_adapter_id(base, cfg)
-  base = (base and base:gsub("^%s+", ""):gsub("%s+$", "") ~= "") and base or "NapCat"
-  local used = {}
-  if type(cfg.platform) == "table" then
-    for _, it in ipairs(cfg.platform) do if type(it) == "table" and it.id then used[tostring(it.id)] = true end end
-  end
-  if not used[base] then return base end
-  local letters = "abcdefghijklmnopqrstuvwxyz"
-  local cand
-  repeat cand = base .. letters:sub(math.random(1, 26), math.random(1, 26)) until not used[cand]
-  return cand
+local function install_base(_)
+  host.spawn(env_pre() .. "\n" .. SH_HELPERS .. SH_BASE .. "\ninstall_sudo_curl_git\n", "基础命令")
+end
+local function install_uv(reinstall)
+  local pre = env_pre()
+  if reinstall then pre = pre .. "\nexport UV_REINSTALL=1" end
+  host.spawn(pre .. "\n" .. SH_HELPERS .. SH_NET .. SH_BASE .. SH_UV .. "\ninstall_sudo_curl_git\ninstall_uv\n", "uv")
 end
 
--- ---------- 绑定状态 ----------
-function NC.compare(client, adapter)
-  if not client or not adapter then return "unconfigured" end
-  if client.port == adapter.port and client.token == adapter.token then return "configured" end
-  return "mismatch"
-end
-
-function NC.binding_snapshot(id)
-  local list = NC.load()
-  local _, ins = NC.find(list, id)
-  if not ins then return nil end
-  local clients = NC.list_clients(id)
-  local adapters = NC.list_adapters()
-  local selClient
-  for _, c in ipairs(clients) do if c.name == ins.boundWebSocketName then selClient = c end end
-  local selAdapter
-  for _, a in ipairs(adapters) do if a.id == ins.boundAdapterId then selAdapter = a end end
-  return {
-    state = NC.compare(selClient, selAdapter),
-    clients = clients, adapters = adapters,
-    selectedClient = selClient and selClient.name or nil,
-    selectedAdapter = selAdapter and selAdapter.id or nil,
-  }
-end
-
-function NC.bind_ws(id, clientName)
-  local qq = NC.detect_qq(id)
-  if not qq then host.toast("请先登录 QQ 后再绑定 BOT"); return end
-  local path = nc_configdir(id) .. "/onebot11_" .. qq .. ".json"
-  local t = host.read_file(path)
-  if not t then host.toast("websocket 配置不存在"); return end
-  local ok, cfg = pcall(json.decode, t)
-  if not ok or type(cfg) ~= "table" or type(cfg.network) ~= "table" then host.toast("配置解析失败"); return end
-  local found = false
-  for _, c in ipairs(cfg.network.websocketClients or {}) do
-    if type(c) == "table" and c.name == clientName then c.enable = true; found = true; break end
-  end
-  if not found then host.toast("未找到 websocket 配置: " .. clientName); return end
-  host.write_file(path, json.encode(cfg))
-  local list = NC.load(); local _, ins = NC.find(list, id)
-  if ins then ins.boundWebSocketName = clientName; NC.save(list) end
-end
-
--- 写 cmd_config: 把 adapterId 适配器设为与所选 websocket 一致
-local function write_adapter(id, adapterId, updateFromWs, invalidatePrev)
-  local list = NC.load(); local _, ins = NC.find(list, id)
-  if not ins then return false end
-  local client
-  for _, c in ipairs(NC.list_clients(id)) do if c.name == ins.boundWebSocketName then client = c end end
-  if not client then host.toast("请先绑定 websocket 适配器"); return false end
-  if not client.port then host.toast("websocket URL 缺少端口"); return false end
-  local cfg = read_astrbot_config()
-  if not cfg or type(cfg.platform) ~= "table" then host.toast("AstrBot 配置不存在"); return false end
-  local oldId = ins.boundAdapterId or ""
-  local found = false
-  for _, item in ipairs(cfg.platform) do
-    if type(item) == "table" then
-      if invalidatePrev and oldId ~= "" and oldId ~= adapterId and item.id == oldId
-          and not bound_by_other(list, oldId, id) then
-        item.enable = false; item.ws_reverse_port = INVALID_PORT; item.ws_reverse_token = INVALID_TOKEN
-      end
-      if item.id == adapterId then
-        found = true
-        if updateFromWs then
-          item.enable = true; item.ws_reverse_host = "0.0.0.0"
-          item.ws_reverse_port = client.port; item.ws_reverse_token = client.token
-        end
-      end
-    end
-  end
-  if not found then host.toast("未找到 AstrBot 适配器: " .. adapterId); return false end
-  write_astrbot_config(cfg)
-  ins.boundAdapterId = adapterId; NC.save(list)
-  return true
-end
-
--- 换绑/覆盖/自动修改 的多重确认流 (复刻原编排), done() 用于刷新对话框
-function NC.bind_adapter(id, adapterId, done)
-  local list = NC.load(); local _, ins = NC.find(list, id)
-  if not ins then return end
-  local client
-  for _, c in ipairs(NC.list_clients(id)) do if c.name == ins.boundWebSocketName then client = c end end
-  if not client then host.toast("请先绑定 websocket 适配器"); return end
-  local adapter
-  for _, a in ipairs(NC.list_adapters()) do if a.id == adapterId then adapter = a end end
-  if not adapter then return end
-  local curId = ins.boundAdapterId or ""
-  local mismatch = client.port ~= adapter.port or client.token ~= adapter.token
-  local invalidatePrev = false
-
-  local function finish()
-    if write_adapter(id, adapterId, mismatch, invalidatePrev) then
-      if mismatch or invalidatePrev then host.toast("已保存，重启 AstrBot 生效") end
-      if done then done() end
-    end
-  end
-  local function step_mismatch()
-    if mismatch then
-      host.confirm("该 AstrBot 适配器与 websocket 的端口或 token 不一致，自动修改适配器？", function(y)
-        if y then finish() end
-      end)
-    else finish() end
-  end
-  local function step_overtaken()
-    if mismatch and bound_by_other(list, adapter.id, id) then
-      host.confirm(adapter.id .. " 已被其他账号绑定，按当前 websocket 覆盖换绑？", function(y)
-        if y then step_mismatch() end
-      end)
-    else step_mismatch() end
-  end
-  if curId ~= "" and curId ~= adapter.id then
-    host.confirm("当前已绑定 " .. curId .. "，换绑到 " .. adapter.id .. "？", function(y)
-      if y then invalidatePrev = true; step_overtaken() end
-    end)
-  else
-    step_overtaken()
-  end
-end
-
-function NC.repair(id, done)
-  local snap = NC.binding_snapshot(id)
-  if not snap or not snap.selectedClient or not snap.selectedAdapter then
-    host.toast("请先选择 websocket 和 AstrBot 适配器"); return
-  end
-  host.confirm("将 AstrBot 适配器同步为所选 websocket 的端口和 token？", function(y)
-    if not y then return end
-    if write_adapter(id, snap.selectedAdapter, true, false) then
-      host.toast("BOT 绑定已修复，重启 AstrBot 生效"); if done then done() end
-    end
-  end)
-end
-
-function NC.create_adapter(id, name, done)
-  local list = NC.load(); local _, ins = NC.find(list, id)
-  if not ins then return end
-  local client
-  for _, c in ipairs(NC.list_clients(id)) do if c.name == ins.boundWebSocketName then client = c end end
-  if not client then host.toast("请先绑定 websocket 适配器"); return end
-  if not client.port then host.toast("websocket URL 缺少端口"); return end
-  local oldId = ins.boundAdapterId or ""
-  local shared = oldId ~= "" and bound_by_other(list, oldId, id)
-
-  local function do_create()
-    local cfg = read_astrbot_config() or {}
-    if type(cfg.platform) ~= "table" then cfg.platform = {} end
-    local aid = unique_adapter_id((name ~= "" and name) or ins.name, cfg)
-    if oldId ~= "" and not shared then
-      for _, item in ipairs(cfg.platform) do
-        if type(item) == "table" and item.id == oldId then
-          item.enable = false; item.ws_reverse_port = INVALID_PORT; item.ws_reverse_token = INVALID_TOKEN
-          break
-        end
-      end
-    end
-    cfg.platform[#cfg.platform + 1] = {
-      id = aid, type = "aiocqhttp", enable = true, ws_reverse_host = "0.0.0.0",
-      ws_reverse_port = client.port, ws_reverse_token = client.token,
-    }
-    write_astrbot_config(cfg)
-    ins.boundAdapterId = aid; NC.save(list)
-    host.toast("已新建适配器 " .. aid .. "，重启 AstrBot 生效")
-    if done then done() end
-  end
-
-  if shared then
-    host.confirm("旧适配器 " .. oldId .. " 已被其他账号绑定，继续新建可能端口冲突，是否继续？", function(y)
-      if y then do_create() end
-    end)
-  else
-    do_create()
-  end
-end
-
--- ---------- launcher 脚本 ----------
-local LAUNCHER_TMPL = [==[
-#!/bin/bash
-set -u
-
-BASE_HOME="/root"
-INSTANCE_ID='__ID__'
-INSTANCE_HOME="$BASE_HOME/napcat_instances/${INSTANCE_ID}_home"
-INSTANCE_WORKDIR="$BASE_HOME/napcat_instances/${INSTANCE_ID}_napcat"
-INSTANCE_DISPLAY="__DISPLAY__"
-WEBUI_PORT="__PORT__"
-
-mkdir -p "$INSTANCE_HOME" "$INSTANCE_WORKDIR/config" "$INSTANCE_WORKDIR/logs" "$INSTANCE_WORKDIR/cache"
-mkdir -p "$INSTANCE_HOME/.config" "$INSTANCE_HOME/.cache" "$INSTANCE_HOME/.local/share"
-
-if [ -d "$BASE_HOME/napcat/config" ]; then
-  cp -n "$BASE_HOME/napcat/config/"*.json "$INSTANCE_WORKDIR/config/" 2>/dev/null || true
-fi
-
-cat > "$INSTANCE_WORKDIR/config/webui.json" <<'WEBUIEOF'
-__WEBUI_JSON__
-WEBUIEOF
-
-echo "[napcat-instance] id=$INSTANCE_ID"
-echo "[napcat-instance] DISPLAY=:$INSTANCE_DISPLAY"
-echo "[napcat-instance] NAPCAT_WORKDIR=$INSTANCE_WORKDIR"
-echo "[napcat-instance] WEBUI_PORT=$WEBUI_PORT"
-
-if [ -f "$INSTANCE_WORKDIR/xvfb.pid" ]; then
-  kill "$(cat "$INSTANCE_WORKDIR/xvfb.pid")" 2>/dev/null || true
-fi
-pkill -f "Xvfb :$INSTANCE_DISPLAY" 2>/dev/null || true
-rm -f "/tmp/.X${INSTANCE_DISPLAY}-lock" "/tmp/.X11-unix/X${INSTANCE_DISPLAY}" 2>/dev/null || true
-mkdir -p /tmp/.X11-unix
-chmod 1777 /tmp/.X11-unix 2>/dev/null || true
-
-Xvfb ":$INSTANCE_DISPLAY" -screen 0 800x600x16 +extension GLX +render > "$INSTANCE_WORKDIR/xvfb.log" 2>&1 &
-echo "$!" > "$INSTANCE_WORKDIR/xvfb.pid"
-for i in $(seq 1 50); do
-  if [ -S "/tmp/.X11-unix/X${INSTANCE_DISPLAY}" ]; then
-    break
-  fi
-  if ! kill -0 "$(cat "$INSTANCE_WORKDIR/xvfb.pid")" 2>/dev/null; then
-    echo "[napcat-instance] Xvfb 启动失败"
-    cat "$INSTANCE_WORKDIR/xvfb.log" 2>/dev/null || true
-    exit 1
-  fi
-  sleep 0.1
-done
-if [ ! -S "/tmp/.X11-unix/X${INSTANCE_DISPLAY}" ]; then
-  echo "[napcat-instance] Xvfb 未就绪，无法启动 QQ"
-  cat "$INSTANCE_WORKDIR/xvfb.log" 2>/dev/null || true
-  exit 1
-fi
-export DISPLAY=":$INSTANCE_DISPLAY"
-export NAPCAT_WORKDIR="$INSTANCE_WORKDIR"
-export HOME="$INSTANCE_HOME"
-export XDG_CONFIG_HOME="$INSTANCE_HOME/.config"
-export XDG_CACHE_HOME="$INSTANCE_HOME/.cache"
-export XDG_DATA_HOME="$INSTANCE_HOME/.local/share"
-
-mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
-
-cd "$BASE_HOME"
-trap "" SIGPIPE
-LD_PRELOAD=./libnapcat_launcher.so qq --no-sandbox
-]==]
-
-function NC.write_launcher(ins)
-  local webui = json.encode({
-    host = "0.0.0.0", port = ins.webUiPort, prefix = "", token = "",
-    loginRate = 3, autoLoginAccount = ins.qq or "",
-  })
-  local s = LAUNCHER_TMPL
-  s = s:gsub("__ID__", (ins.id:gsub("%%", "%%%%")))
-  s = s:gsub("__DISPLAY__", tostring(ins.display))
-  s = s:gsub("__PORT__", tostring(ins.webUiPort))
-  s = s:gsub("__WEBUI_JSON__", (webui:gsub("%%", "%%%%")))
-  host.write_file(nc_root() .. "/launcher_" .. ins.id .. ".sh", s)
-end
-
--- ---------- 生命周期 ----------
-function NC.add()
-  local list = NC.load()
-  local usedDisp = { [napcat_x_display()] = true }
-  for _, v in ipairs(list) do usedDisp[v.display] = true end
-  local display
-  for d = DISPLAY_FIRST, 99 do if not usedDisp[d] then display = d; break end end
-  if not display then host.toast("没有可用 DISPLAY"); return end
-
-  local wexcl = { ports.get("dashboard"), ports.get("onebot") }
-  for _, v in ipairs(list) do wexcl[#wexcl + 1] = v.webUiPort end
-  host.free_port(WEBUI_FIRST, WEBUI_LAST, wexcl, function(webPort)
-    if not webPort then host.toast("没有可用 WebUI 端口"); return end
-    local oexcl = { ports.get("dashboard") }
-    for _, v in ipairs(list) do if v.oneBotPort then oexcl[#oexcl + 1] = v.oneBotPort end end
-    host.free_port(ONEBOT_FIRST, ONEBOT_LAST, oexcl, function(obPort)
-      if not obPort then host.toast("没有可用 OneBot 端口"); return end
-      local idx = #list + 1
-      local ins = {
-        id = "qq" .. idx .. "_" .. tostring(os.time()) .. tostring(math.random(1000, 9999)),
-        name = "账号" .. idx, qq = "", webUiPort = webPort, display = display,
-        oneBotPort = obPort, token = "", boundWebSocketName = WS_NAME, boundAdapterId = "",
-      }
-      list[#list + 1] = ins
-      NC.save(list)
-      NC.ensure_onebot(ins)
-    end)
-  end)
-end
-
-function NC.edit(id, name, webPort)
-  local list = NC.load(); local _, ins = NC.find(list, id)
-  if not ins then return end
-  if name and name ~= "" then ins.name = name end
-  if webPort and webPort ~= ins.webUiPort then
-    if webPort < WEBUI_FIRST or webPort > WEBUI_LAST then
-      host.toast("WebUI 端口需在 " .. WEBUI_FIRST .. "-" .. WEBUI_LAST); return
-    end
-    for _, v in ipairs(list) do
-      if v.id ~= id and v.webUiPort == webPort then host.toast("端口已被占用"); return end
-    end
-    ins.webUiPort = webPort
-  end
-  NC.save(list)
-  NC.write_launcher(ins)
-end
-
-function NC.start(id)
-  local list = NC.load(); local _, ins = NC.find(list, id)
-  if not ins then return end
-  NC.ensure_onebot(ins)
-  NC.write_launcher(ins)
-  local cmd = "echo [napcat] run launcher_" .. id .. ".sh; " ..
-    "chmod +x /root/launcher_" .. id .. ".sh; bash /root/launcher_" .. id .. ".sh"
-  host.spawn(cmd, ins.name or id, "napcat:" .. id)
-  host.nav.go(2)
-end
-
-local function nc_cleanup_cmd(id, display)
-  local c = {
-    'if [ -f /root/napcat_instances/' .. id .. '_napcat/qq.pid ]; then kill "$(cat /root/napcat_instances/' .. id .. '_napcat/qq.pid)" 2>/dev/null || true; fi',
-    'if [ -f /root/napcat_instances/' .. id .. '_napcat/xvfb.pid ]; then kill "$(cat /root/napcat_instances/' .. id .. '_napcat/xvfb.pid)" 2>/dev/null || true; fi',
-    'pkill -f "launcher_' .. id .. '.sh" || true',
-    'pkill -f "napcat_instances/' .. id .. '_napcat" || true',
-    'pkill -f "napcat_instances/' .. id .. '_home" || true',
-  }
-  if display and display > 0 then c[#c + 1] = 'pkill -f "Xvfb :' .. display .. '" || true' end
-  c[#c + 1] = 'rm -f /root/napcat_instances/' .. id .. '_napcat/qq.pid'
-  c[#c + 1] = 'rm -f /root/napcat_instances/' .. id .. '_napcat/xvfb.pid'
-  return table.concat(c, "; ")
-end
-
-function NC.stop(id)
-  host.stop("napcat:" .. id)
-  local list = NC.load(); local _, ins = NC.find(list, id)
-  host.exec(nc_cleanup_cmd(id, ins and ins.display or -1))
-end
-
-function NC.logout(id)
-  NC.stop(id)
-  host.exec('rm -rf /root/napcat_instances/' .. id .. '_napcat; ' ..
-    'rm -rf /root/napcat_instances/' .. id .. '_home; rm -f /root/launcher_' .. id .. '.sh')
-  local list = NC.load(); local _, ins = NC.find(list, id)
-  if ins then
-    ins.qq = ""; ins.token = ""; ins.boundWebSocketName = ""; ins.boundAdapterId = ""
-    NC.save(list)
-  end
-end
-
-function NC.delete(id)
-  NC.logout(id)
-  local list = NC.load(); local i = NC.find(list, id)
-  if i then table.remove(list, i); NC.save(list) end
-end
-
-function NC.webui_url(ins)
-  local url = "http://127.0.0.1:" .. ins.webUiPort .. "/webui"
-  if ins.token and ins.token ~= "" then url = url .. "?token=" .. ins.token end
-  return url
-end
+local ENV_STEPS = {
+  { id = "base",     title = "基础命令", sub = "sudo / git / curl", run = install_base },
+  { id = "uv",       title = "uv",       sub = "Python 依赖管理工具 (自动装最新版)", run = install_uv },
+  { id = "opencode", title = "opencode", sub = "AI coding agent (沙盒自带)", run = function(reinstall) agent.install(reinstall) end },
+}
 
 -- ============================================================
--- 主页 UI
+-- 小工具
 -- ============================================================
-
-local function quick_start_card(ctx)
-  local running = ctx.running and ctx.running["astrbot"]
-  local dash = ports.get("dashboard")
-  return card("AstrBot", {
-    tile("监听端口", {
-      icon = "settings_ethernet",
-      subtitle = "127.0.0.1:" .. dash,
-      trailing = iconbutton("edit_outlined", function()
-        host.input({ title = "AstrBot 监听端口", default = tostring(dash), hint = "6185" }, function(v)
-          if v and v ~= "" and tonumber(v) then
-            ports.set("dashboard", tonumber(v))
-            host.toast("端口已保存，重启 AstrBot 后生效")
-          end
-        end)
-      end),
-    }),
-    spacer(12),
-    row({
-      expanded(button(running and "停止" or "启动 AstrBot", function()
-        astrbot_toggle(running)
-      end, { icon = running and "stop" or "play_arrow" })),
-      expanded(button("打开 WebUI", function()
-        host.webview_open("http://127.0.0.1:" .. dash .. "/", "AstrBot")
-      end, { variant = "tonal", icon = "language" })),
-    }, { gap = 12 }),
-  })
+local function chip_status(ok)
+  return chip(ok and "已安装" or "未安装", { color = ok and "green" or "grey" })
 end
 
-local function env_card()
-  local children = {
-    select({
-      title = "GitHub 代理",
-      value = host.get("environment_github_proxy") or "auto",
-      options = PROXIES,
-      onChanged = function(v) host.set("environment_github_proxy", v) end,
-    }),
-  }
-  for _, s in ipairs(ENV_STEPS) do
-    local done = env_installed(s.id)
-    children[#children + 1] = tile(s.title, {
-      icon = done and "check_circle" or "error_outline",
-      iconColor = done and "green" or "orange",
-      subtitle = s.sub,
-      trailing = button(done and "重装" or "安装", function()
-        STEP_RUN[s.id](done)
-      end, { variant = "tonal" }),
-    })
-  end
-  return expansion("环境管理", children, { icon = "build_outlined" })
-end
-
-local function add_napcat()
-  NC.add()
-end
-
--- BOT 绑定对话框 (自定义组件对话框)
-local function bind_bot_dialog(ins)
-  local id = ins.id
-  local d = state("bind." .. id, nil)
-  local function reload() d.set(NC.binding_snapshot(id)) end
-  reload()
-  host.dialog({
-    title = "绑定 BOT",
-    build = function()
-      local data = d.get()
-      if not data then return center(spinner()) end
-      local kids = {}
-      local scolor = data.state == "configured" and "green"
-        or (data.state == "mismatch" and "orange" or "red")
-      local stext = data.state == "configured" and "已绑定 BOT"
-        or (data.state == "mismatch" and "BOT 绑定异常" or "未绑定 BOT")
-      kids[#kids + 1] = chip(stext, { color = scolor })
-      if data.state == "mismatch" then
-        kids[#kids + 1] = button("修复绑定", function()
-          NC.repair(id, function() reload() end)
-        end, { variant = "tonal", icon = "build_outlined" })
-      end
-      kids[#kids + 1] = text("websocket 适配器", { weight = "bold" })
-      local clients = data.clients or {}
-      if #clients == 0 then
-        kids[#kids + 1] = text("未找到 websocket client 配置", { color = "grey" })
-      else
-        for _, c in ipairs(clients) do
-          local sel = data.selectedClient == c.name
-          kids[#kids + 1] = tile(c.name, {
-            subtitle = (c.enabled and "已启用" or "未启用") .. " · " .. (c.url or ""),
-            icon = sel and "check_circle" or nil,
-            iconColor = sel and "green" or nil,
-            onTap = function() NC.bind_ws(id, c.name); reload() end,
-          })
-        end
-      end
-      kids[#kids + 1] = divider()
-      kids[#kids + 1] = row({
-        expanded(text("AstrBot 适配器", { weight = "bold" })),
-        button("新建", function()
-          host.input({ title = "新建 AstrBot 适配器", default = ins.name, hint = "留空使用账号名" },
-            function(name) NC.create_adapter(id, name or "", function() reload() end) end)
-        end, { variant = "text", icon = "add" }),
-      }, { cross = "center" })
-      local adapters = data.adapters or {}
-      if #adapters == 0 then
-        kids[#kids + 1] = text("未找到 AstrBot OneBot 适配器", { color = "grey" })
-      else
-        for _, ad in ipairs(adapters) do
-          local sel = data.selectedAdapter == ad.id
-          local tk = (ad.token and ad.token ~= "") and "已设置" or "空"
-          kids[#kids + 1] = tile(ad.id, {
-            subtitle = (ad.enabled and "已启用" or "未启用") .. " · " .. tostring(ad.port) .. " · token " .. tk,
-            icon = sel and "check_circle" or nil,
-            iconColor = sel and "green" or nil,
-            onTap = function() NC.bind_adapter(id, ad.id, function() reload() end) end,
-          })
-        end
-      end
-      return column(kids, { cross = "stretch", gap = 4 })
-    end,
-  })
-end
-
-local function napcat_tile(ins)
-  local running = ins.running
-  local logged = ins.qq and ins.qq ~= ""
-  return tile(ins.name, {
-    icon = running and "play_circle" or "pause_circle_outline",
-    iconColor = running and "green" or nil,
-    subtitle = "QQ " .. (logged and ins.qq or "未登录，启动后扫码") .. "\nWebUI " .. tostring(ins.webUiPort),
-    trailing = row({
-      iconbutton("language", function() host.webview_open(NC.webui_url(ins), ins.name) end, { tooltip = "打开 WebUI" }),
-      iconbutton(running and "stop" or "play_arrow", function()
-        if running then NC.stop(ins.id) else NC.start(ins.id) end
-      end, { tooltip = running and "停止" or "启动" }),
-      menu("more_vert", {
-        { label = "编辑", onTap = function()
-          host.input({ title = "编辑账号名", default = ins.name }, function(name)
-            if name and name ~= "" then NC.edit(ins.id, name, ins.webUiPort) end
-          end)
-        end },
-        { label = "绑定 BOT", onTap = function() bind_bot_dialog(ins) end },
-        { label = "复制 token", enabled = (ins.token ~= nil and ins.token ~= ""), onTap = function()
-          host.clipboard.copy(ins.token); host.toast("已复制 token")
-        end },
-        { label = "复制完整链接", onTap = function()
-          host.clipboard.copy(NC.webui_url(ins)); host.toast("已复制链接")
-        end },
-        { label = "退出登录", onTap = function()
-          host.confirm("确定退出该账号登录?", function(y) if y then NC.logout(ins.id) end end)
-        end },
-        { label = "删除", onTap = function()
-          host.confirm("确定删除该账号?", function(y) if y then NC.delete(ins.id) end end)
-        end },
-      }),
-    }, { main = "end" }),
-  })
-end
-
-local function napcat_card(ctx)
-  local children = {
-    row({
-      icon("pets"),
-      spacer(8),
-      expanded(text("NapCat 账号", { weight = "bold", size = 16 })),
-      iconbutton("add", function() add_napcat() end, { tooltip = "添加账号" }),
-    }, { cross = "center" }),
-  }
-  local list = NC.load()
-  if #list == 0 then
-    children[#children + 1] = padding(text("暂无账号，点击右上角 + 添加", { color = "grey" }), 8)
-  else
-    for _, ins in ipairs(list) do
-      ins.running = ctx.running and ctx.running["napcat:" .. ins.id] or false
-      children[#children + 1] = napcat_tile(ins)
-    end
-  end
-  return card(nil, children)
-end
-
-local function do_backup(cb)
-  local ub = host.ubuntu_path()
-  if not host.exists(ub .. "/root/AstrBot/data") then
-    host.toast("AstrBot 数据目录不存在"); if cb then cb(false) end; return
-  end
-  local dir = host.backup_dir()
-  host.mkdirs(dir)
-  local name = "AstrBotBubble-backup-" .. os.date("%Y%m%d-%H%M%S") .. ".tar.gz"
-  local path = dir .. "/" .. name
-  host.run(host.bin_path() .. "/busybox",
-    { "tar", "-czf", path, "-C", ub .. "/root/AstrBot", "data" },
-    function(res)
-      if res.code == 0 then
-        host.toast("备份成功: " .. name); if cb then cb(true) end
-      else
-        host.toast("备份失败: " .. (res.stderr or "")); if cb then cb(false) end
-      end
-    end)
-end
-
-local function do_restore()
-  local dir = host.backup_dir()
-  local files = {}
-  for _, e in ipairs(host.list_dir(dir)) do
-    if (not e.isDir) and e.name:match("^AstrBotBubble%-backup%-") and e.name:match("%.tar%.gz$") then
-      files[#files + 1] = e
-    end
-  end
-  if #files == 0 then host.toast("未找到备份文件"); return end
-  host.dialog({
-    title = "选择备份还原",
-    build = function()
-      local kids = {}
-      for _, f in ipairs(files) do
-        kids[#kids + 1] = tile(f.name, {
-          icon = "restore",
-          onTap = function()
-            host.confirm("还原将覆盖当前数据，确定?", function(y)
-              if y then
-                local ub = host.ubuntu_path()
-                host.run(host.bin_path() .. "/busybox",
-                  { "tar", "-xzf", f.path, "-C", ub .. "/root/AstrBot" },
-                  function(res)
-                    host.close_dialog()
-                    if res.code == 0 then
-                      host.toast("还原成功，应用即将退出"); host.exit_app()
-                    else
-                      host.toast("还原失败: " .. (res.stderr or ""))
-                    end
-                  end)
-              end
-            end)
-          end,
-        })
-      end
-      return column(kids, { cross = "stretch" })
-    end,
-  })
-end
-
-local function manage_section()
-  return expansion("AstrBot 管理", {
-    tile("覆盖安装插件依赖", {
-      icon = "build_outlined", subtitle = "重新安装 AstrBot 并覆盖插件依赖",
-      trailing = button("执行", function() step_astrbot(false, true) end, { variant = "tonal" }),
-    }),
-    tile("备份 AstrBot 数据", {
-      icon = "backup_outlined", subtitle = "打包 data 到下载目录",
-      trailing = button("备份", function() do_backup() end, { variant = "tonal" }),
-    }),
-    tile("还原 AstrBot 数据", {
-      icon = "restore", subtitle = "从备份文件恢复 data",
-      trailing = button("还原", do_restore, { variant = "tonal" }),
-    }),
-    tile("清除 AstrBot 数据", {
-      icon = "delete_outline", subtitle = "删除 data 数据目录 (不可恢复)",
-      trailing = button("清除", function()
-        host.confirm("确定要清除 AstrBot 数据吗?", function(yes)
-          if yes then host.delete_dir(host.ubuntu_path() .. "/root/AstrBot/data"); host.exit_app() end
-        end)
-      end, { danger = true }),
-    }),
-    tile("重置 Python 环境", {
-      icon = "refresh", subtitle = "删除 .venv 并重建依赖",
-      trailing = button("重置", function()
-        host.confirm("确定要重置 Python 环境吗?", function(yes)
-          if yes then host.delete_dir(host.ubuntu_path() .. "/root/AstrBot/.venv"); host.exit_app() end
-        end)
-      end, { danger = true }),
-    }),
-  }, { icon = "settings_outlined" })
-end
-
--- 流式文本演示: 逐字追加只重绘绑定的那一个 Text, 不重跑整页 (适合 AI 逐字输出)
-local function stream_demo()
-  reactive("demo.reply", "点右侧按钮看逐字输出 →")
-  local tokens = {
-    "这是","一段","用于","演示","流式","输出","的","文字","：","逐","字","追","加","，",
-    "只","会","重","绘","这","一个","文","本","组","件","，","而","不","会","重","跑","整","页","界","面","。",
-  }
-  return card({
-    row({
-      text("流式文本演示", { weight = "bold", size = 16 }),
-      button("模拟逐字输出", function()
-        local reply = reactive("demo.reply")
-        reply.set("")
-        local i, id = 0, nil
-        id = host.interval(70, function()
-          i = i + 1
-          if i > #tokens then host.clear_interval(id); return end
-          reply.set(reply.get() .. tokens[i])
-        end)
-      end, { variant = "tonal" }),
-    }, { main = "spaceBetween" }),
-    text("", { bind = "demo.reply", color = "grey" }),
-    -- 系统通知演示: 3 秒后推送一条 (可退到后台看效果)
-    button("3 秒后发通知", function()
-      host.delay(3000, function()
-        host.notify{ title = "AstrBot 提醒", body = "这是一条来自 Lua 的系统通知 " .. os.date("%H:%M:%S") }
-      end)
-      host.toast("3 秒后推送, 可切到后台")
-    end, { variant = "tonal" }),
-    -- 虚拟化长列表演示: 500 项, 仅构建可视项, 瞬开且流畅
-    text("虚拟化长列表 (500 项)", { weight = "bold", size = 14 }),
-    box({
-      height = 180,
-      child = (function()
-        local items = {}
-        for i = 1, 500 do
-          items[i] = tile("第 " .. i .. " 项", { subtitle = "虚拟化列表, 只渲染可视部分", key = i })
-        end
-        return list(items, { scroll = true })
-      end)(),
-    }),
-  })
-end
-
--- 动态贴图: 从 widgets/ 动态加载一个组件贴到主页, 可随时切换风格 (loadlua 演示 · 方式一)
-local function dynamic_sticker_card(ctx)
-  local dir = SCRIPTS .. "/widgets"
-  local files = {}
-  for _, e in ipairs(host.list_dir(dir)) do
-    if not e.isDir and e.name:match("%.lua$") then
-      files[#files + 1] = { name = e.name:gsub("%.lua$", ""), path = e.path }
-    end
-  end
-  table.sort(files, function(a, b) return a.name < b.name end)
-
-  local sel = state("sticker.sel", files[1] and files[1].path or nil)
-
-  local rendered
-  if sel.get() then
-    local m = loadlua(sel.get())
-    if type(m) == "table" and m.build then rendered = m.build(ctx)
-    elseif m then rendered = m end
-  end
-
-  local picker = {}
-  for _, f in ipairs(files) do
-    local active = sel.get() == f.path
-    picker[#picker + 1] = button(f.name, function() sel.set(f.path) end,
-      { variant = active and "filled" or "outlined" })
-  end
-
-  return card({
-    row({
-      icon("dashboard_customize_outlined"),
-      spacer(8),
-      expanded(text("动态贴图 (样式切换)", { weight = "bold", size = 16 })),
-    }, { cross = "center" }),
-    text("从 widgets/ 动态加载一个组件贴到这里, 可随时换风格", { color = "grey", size = 12 }),
-    spacer(12),
-    rendered or text("(把 .lua 放进 widgets/ 即可)", { color = "grey" }),
-    spacer(12),
-    wrap(picker, { spacing = 8, runSpacing = 8 }),
-  })
-end
-
-app.page("home", function(ctx)
-  local score = state("runner.score", 0)
-  local status = state("runner.status", "准备就绪")
-  -- 从数据库读历史最高分 (重启 app 后依然存在)
-  local high = 0
-  local db = store.open("runner")
-  for _, row in ipairs(db.query("SELECT MAX(score) AS hi FROM hiscore", {})) do
-    high = tonumber(row.hi) or 0
-  end
-  return {
-    quick_start_card(ctx),
-    napcat_card(ctx),
-    env_card(),
-    manage_section(),
-    -- 双向通信示例: 游戏把分数/状态回传给 UI, 按钮把命令发给游戏
+local function feature_card(iconName, title, sub, tabIndex, color)
+  return inkwell(
     card({
       row({
-        text("跑酷小游戏", { weight = "bold", size = 16 }),
-        text("得分 " .. score.get() .. " · " .. status.get() .. " · 最高" .. high .. "分",
-          { color = "grey" }),
-      }, { main = "spaceBetween" }),
-      row({
-        button("重新开始", function() love.send(0, "reset") end, { variant = "tonal" }),
-        button("让它跳", function() love.send(0, "jump") end, { variant = "tonal" }),
-      }, { gap = 8 }),
-      love{
-        id = 0, height = 220, game = SCRIPTS.."/games/runner",
-        onEvent = function(msg)
-          local t = msg.type
-          local d = msg.data or {}
-          if t == "score" then
-            score.set(d.value or 0)
-          elseif t == "over" then
-            status.set("撞车了")
-            -- 撞车时把本次得分写入持久化
-            local finalScore = d.score or score.get()
-            if finalScore > 0 then
-              db.run("INSERT INTO hiscore(score,at) VALUES(?,?)",
-                { finalScore, os.date("%Y-%m-%d %H:%M:%S") })
-            end
-          elseif t == "start" then
-            score.set(0); status.set("进行中")
-          end
-        end,
-      },
+        box({ width = 46, height = 46, child = center(icon(iconName, { size = 26, color = color or "primary" })),
+          style = { bg = (color or "primary"), radius = 12, opacity = 0.14 } }),
+        spacer(12),
+        expanded(column({
+          text(title, { weight = "bold", size = 15 }),
+          text(sub, { size = 12, color = "grey" }),
+        }, { gap = 2 })),
+        icon("chevron_right", { color = "grey" }),
+      }, { cross = "center" }),
     }),
-    -- 流式文本示例: 逐字追加只重绘这一个 Text, 不重跑整页 (适合 AI 逐字输出)
-    stream_demo(),
-    -- 动态贴图示例 (loadlua 方式一): 从 widgets/ 挑一个组件贴上来, 可换风格
-    dynamic_sticker_card(ctx),
+    { onTap = function() host.nav.go(tabIndex) end }
+  )
+end
+
+-- ============================================================
+-- 动态加载槽位: 按需 loadlua 一个独立模块, 用完卸载 (不常驻/不污染主脚本)
+-- 模块级 upvalue, 跨页面重建持久; 生命周期靠 lifecycle 的 onHide/onShow 接到模块 pause/resume
+-- ============================================================
+local DYN_APPS = {
+  { label = "时钟",       icon = "schedule",      path = SCRIPTS .. "/apps/clock.lua" },
+  { label = "调色板",     icon = "palette",       path = SCRIPTS .. "/apps/palette.lua" },
+  { label = "算力·切走停", icon = "layers_clear",  path = SCRIPTS .. "/apps/compute.lua" },
+  { label = "算力·后台续", icon = "bolt",          path = SCRIPTS .. "/apps/compute_bg.lua" },
+}
+local dyn_current, dyn_paused = nil, false
+
+local function dyn_unload()
+  if dyn_current and dyn_current.dispose then pcall(dyn_current.dispose) end
+  dyn_current, dyn_paused = nil, false
+end
+local function dyn_load(path)
+  dyn_unload()
+  dyn_current = loadlua(path)
+end
+local function dyn_hide()   -- 不可见: 仅 unload="hidden" 的模块暂停; "back" 的继续跑
+  if dyn_current and dyn_current.unload == "hidden" and dyn_current.pause and not dyn_paused then
+    pcall(dyn_current.pause); dyn_paused = true
+  end
+end
+local function dyn_show()   -- 回到可见: 恢复被暂停的模块
+  if dyn_current and dyn_paused and dyn_current.resume then
+    pcall(dyn_current.resume); dyn_paused = false
+  end
+end
+
+-- 动态贴图 (widgets/): 主页上用 loadlua 切换不同样式的贴图
+local STICKERS = {
+  { name = "极光", path = SCRIPTS .. "/widgets/aurora.lua" },
+  { name = "极简", path = SCRIPTS .. "/widgets/mono.lua" },
+  { name = "霓虹", path = SCRIPTS .. "/widgets/neon.lua" },
+}
+
+-- 文件查看器: .md 渲染为 Markdown, 其它按纯文本; 完整内容 (超大才截断), 可滚动。
+local function open_file_viewer(name, path)
+  local body = host.read_file(path)
+  if not body then host.toast("无法读取 (可能是二进制文件)"); return end
+  if #body > 100000 then body = body:sub(1, 100000) .. "\n\n…(文件过大, 已截断)" end
+  local is_md = tostring(name):lower():match("%.md$") ~= nil
+  host.dialog({
+    title = tostring(name),
+    build = function()
+      return box({ height = 460, child = scroll({
+        is_md and markdown(body) or text(body, { size = 12 }),
+      }) })
+    end,
+    actions = { { label = "关闭", variant = "text" } },
+  })
+end
+
+-- 顶栏按钮说明: 图标 + 功能文字 (row 里长文本用 expanded 防溢出)
+local function btn_desc(iconName, desc)
+  return row({
+    icon(iconName, { size = 24, color = "primary" }),
+    spacer(12),
+    expanded(text(desc, { size = 13 })),
+  }, { cross = "center" })
+end
+
+-- ============================================================
+-- 主页 home
+-- ============================================================
+app.page("home", function(ctx)
+  local dev = host.device_info() or {}
+  return {
+    -- Hero: 动态 love 贴图 + 标题
+    card({
+      clip(love{ id = 3, game = SCRIPTS .. "/games/demo", height = 150, freeze = true }, { radius = 14 }),
+      spacer(12),
+      text("Android DIY Sandbox", { size = 22, weight = "bold" }),
+      text("一个用 Lua 声明式定义的空壳运行时 · v" .. tostring(dev.appVersion or "0.2.0"),
+        { size = 12, color = "grey" }),
+    }),
+
+    section("探索能力", {
+      column({
+        feature_card("widgets_outlined",        "组件画廊", "按钮 / 表单 / 布局 / 反馈", TAB.gallery,  "indigo"),
+        feature_card("cloud_outlined",           "网络能力", "HTTP / WebSocket / 通知",   TAB.network,  "teal"),
+        feature_card("folder_open_outlined",     "文件存储", "读写 / 目录 / SQLite",      TAB.files,    "orange"),
+        feature_card("sports_esports_outlined",  "love2d",  "小游戏 · 生命周期演示",     TAB.games,    "pink"),
+      }, { gap = 10 }),
+    }),
+
+    -- 动态贴图: 用 loadlua 切换 widgets/ 里的样式模块 (按需加载、用完即弃)
+    section("动态贴图 (loadlua)", {
+      (function()
+        local sel = state("home.sticker", 1)
+        local mod = loadlua(STICKERS[sel.get()].path)
+        local btns = {}
+        for i, s in ipairs(STICKERS) do
+          btns[#btns + 1] = button(s.name, function() sel.set(i) end,
+            { variant = (i == sel.get()) and "filled" or "tonal" })
+        end
+        return card({
+          (mod and mod.build) and mod.build() or text("(加载失败)", { color = "grey" }),
+          spacer(12),
+          row(btns, { gap = 8 }),
+        })
+      end)(),
+    }),
+
+    -- opencode / 环境
+    section("Agent 环境 (opencode)", {
+      card({
+        text("沙盒的 AI Agent 能力基于 Ubuntu 容器内的 opencode。顶栏右侧 (设置齿轮左边) 两枚按钮即入口。",
+          { size = 13, color = "grey" }),
+        spacer(10),
+        tile("GitHub 代理", {
+          subtitle = "当前: " .. gh_proxy_label(gh_proxy()) .. " · 点击测速并选择镜像",
+          icon = "swap_horiz",
+          onTap = open_gh_dialog,
+        }),
+        spacer(6),
+        column((function()
+          local rows = {}
+          for _, s in ipairs(ENV_STEPS) do
+            local ok = env_installed(s.id)
+            rows[#rows + 1] = tile(s.title, {
+              subtitle = s.sub,
+              icon = ok and "check_circle" or "radio_button_unchecked",
+              trailing = row({
+                chip_status(ok),
+                spacer(8),
+                button(ok and "重装" or "安装", function() s.run(ok) end, { variant = ok and "text" or "tonal" }),
+              }, { cross = "center" }),
+            })
+          end
+          return rows
+        end)(), { gap = 2 }),
+      }),
+    }),
+
+    section("关于", {
+      card("主页顶栏按钮", {
+        btn_desc("refresh", "重新加载 Lua 脚本"),
+        spacer(12),
+        btn_desc("construction", "Lua 脚本 DIY 开发。脚本目录挂载至 Ubuntu 的 /app-lua-runtime, 用 opencode 定制"),
+        spacer(12),
+        btn_desc("smart_toy_outlined", "在容器中使用 opencode (/root 目录)"),
+        spacer(12),
+        btn_desc("settings", "应用设置"),
+      }),
+      spacer(10),
+      card("设置页顶栏按钮", {
+        btn_desc("file_download_outlined", "从外部加载并替换 Lua 脚本 (ZIP 打包整个 lua 目录, 注意不要嵌套文件夹)"),
+        spacer(12),
+        btn_desc("file_upload_outlined", "将 lua 目录备份至系统下载目录"),
+        spacer(12),
+        btn_desc("article_outlined", "查看 Lua 脚本运行日志"),
+      }),
+      spacer(10),
+      card({
+        tile("查看文档", { subtitle = "AGENTS.md · 完整 Lua API", icon = "menu_book_outlined",
+          onTap = function() open_file_viewer("AGENTS.md", SCRIPTS .. "/AGENTS.md") end }),
+        tile("设备", { subtitle = tostring(dev.brand or "?") .. " " .. tostring(dev.model or "") ..
+          "  ·  Android " .. tostring(dev.osVersion or "?"), icon = "smartphone" }),
+      }),
+    }),
   }
 end)
 
 -- ============================================================
--- 游戏页: 整页 love 画布 + 多标签切换 (每块画布唯一 id)
+-- 画廊 gallery: UI 组件展示 (页内多标签)
 -- ============================================================
-app.page("game_full", function()
-  local tab = state("game.tab", 1)
-  -- tabs keepalive=false: 只挂载当前标签, 切走即卸载另一个标签 (触发其 love 的 dispose)。
-  -- 旋转三角: keepalive=true + freeze=true → 卸载时仅挂起并冻结时钟, 回来从快照继续。
-  -- 跑酷:     keepalive=false           → 卸载时彻底销毁进程, 回来全新从头启动。
+-- 打字机: UTF-8 逐字循环输出 (reactive 刷新, 只重绘这一个文本, 不重建整页)
+local TYPER_LINES = {
+  "欢迎来到 Android DIY Sandbox",
+  "用纯 Lua 声明式定义界面",
+  "reactive 让文本逐字刷新, 不重建整页",
+}
+local function utf8_chars(s)
+  local t = {}
+  for c in s:gmatch("[\1-\127\194-\244][\128-\191]*") do t[#t + 1] = c end
+  return t
+end
+local typer_timer, typer_line, typer_n = nil, 1, 0
+local function typer_tick()
+  local chars = utf8_chars(TYPER_LINES[typer_line])
+  typer_n = typer_n + 1
+  if typer_n > #chars + 8 then          -- 打完停留几拍 → 切下一句
+    typer_n = 0
+    typer_line = typer_line % #TYPER_LINES + 1
+    return
+  end
+  local k = math.min(typer_n, #chars)
+  reactive("gallery.typer").set(table.concat(chars, "", 1, k) .. (typer_n <= #chars and " ▌" or ""))
+end
+local function typer_start() if not typer_timer then typer_timer = host.interval(130, typer_tick) end end
+local function typer_stop() if typer_timer then host.clear_interval(typer_timer); typer_timer = nil end end
+
+local function swatch(name, color)
+  return column({
+    box({ width = 50, height = 50, child = center(icon(name, { size = 24, color = "white" })),
+      style = { bg = color, radius = 15, shadow = { color = "#33000000", blur = 8, dy = 3 } } }),
+    spacer(5),
+    text(name, { size = 10, color = "grey" }),
+  }, { cross = "center" })
+end
+
+local function gallery_basic()
+  reactive("gallery.typer", "")
+  typer_start()
+  return column({
+    card("打字机 · reactive 逐字刷新", {
+      box({ height = 32, child = align(text("", { bind = "gallery.typer", size = 18, weight = "bold", color = "primary" }), "centerLeft") }),
+      text("host.interval + reactive 循环输出, 只重绘这一行文本。", { size = 12, color = "grey" }),
+    }),
+    card("排版层级", {
+      text("Display 大标题", { size = 30, weight = "bold" }),
+      spacer(4),
+      text("Section · 小节标题", { size = 18, weight = "bold", color = "primary" }),
+      spacer(8),
+      text("正文段落:界面就是组件树,每个组件是一个普通 Lua 表,可自由拼接、按条件生成。",
+        { size = 14 }),
+      spacer(6),
+      text("Caption · 辅助说明文字", { size = 12, color = "grey" }),
+    }),
+    card("富文本混排", {
+      richtext({
+        { text = "同一行内支持 " },
+        { text = "加粗", weight = "bold" },
+        { text = "、" },
+        { text = "彩色", color = "primary", weight = "bold" },
+        { text = "、" },
+        { text = "下划线", underline = true },
+        { text = "、" },
+        { text = "斜体", italic = true, color = "teal" },
+        { text = " 自由组合。" },
+      }),
+    }),
+    card("图标", {
+      wrap({
+        swatch("favorite", "red"),
+        swatch("bolt", "amber"),
+        swatch("rocket_launch", "indigo"),
+        swatch("eco", "green"),
+        swatch("cloud", "teal"),
+        swatch("palette", "purple"),
+      }, { spacing = 16, runSpacing = 14 }),
+    }),
+    card("头像 / 标签 / 角标", {
+      row({
+        avatar({ icon = "person", color = "indigo" }),
+        spacer(10),
+        avatar({ text = "AI", color = "teal" }),
+        spacer(16),
+        badge(icon("notifications_outlined", { size = 28 }), { label = "9", color = "red" }),
+        spacer(16),
+        chip("标签", { color = "primary" }),
+        spacer(8),
+        chip("完成", { color = "green" }),
+      }, { cross = "center" }),
+    }),
+    card("进度", {
+      row({ spinner({ size = 22 }), spacer(12), expanded(text("环形加载(不确定)")) }, { cross = "center" }),
+      spacer(14),
+      row({ expanded(text("下载", { size = 13 })), text("35%", { size = 13, color = "grey" }) }),
+      spacer(5),
+      progress(0.35),
+      spacer(12),
+      row({ expanded(text("完成", { size = 13 })), text("70%", { size = 13, color = "grey" }) }),
+      spacer(5),
+      progress(0.7, { color = "green" }),
+    }),
+  }, { gap = 12 })
+end
+
+local function gallery_interactive()
+  local sw    = state("g.switch", true)
+  local ck    = state("g.check", false)
+  local sld   = state("g.slider", 40)
+  local seg   = state("g.seg", "b")
+  local sel   = state("g.select", "cn")
+  local rad   = state("g.radio", "a")
+  local echo  = state("g.text", "")
+  return column({
+    card("按钮", {
+      wrap({
+        button("Filled", function() host.toast("filled") end),
+        button("Tonal", function() host.toast("tonal") end, { variant = "tonal" }),
+        button("Outlined", function() host.toast("outlined") end, { variant = "outlined" }),
+        button("Text", function() host.toast("text") end, { variant = "text" }),
+      }, { spacing = 8, runSpacing = 8 }),
+      spacer(8),
+      row({
+        button("发送", function() host.toast("发送") end, { icon = "send" }),
+        spacer(8),
+        button("删除", function() host.toast("删除") end, { icon = "delete", danger = true }),
+        spacer(8),
+        iconbutton("thumb_up", function() host.toast("赞") end, { tooltip = "点赞" }),
+      }, { cross = "center" }),
+    }),
+    card("开关 / 复选 / 单选", {
+      toggle({ title = "启用通知", value = sw.get(), onChanged = function(v) sw.set(v) end }),
+      checkbox({ title = "记住我", value = ck.get(), onChanged = function(v) ck.set(v) end }),
+      radio({ title = "主题", value = rad.get(), axis = "row",
+        options = { { label = "浅色", value = "a" }, { label = "深色", value = "b" }, { label = "跟随", value = "c" } },
+        onChanged = function(v) rad.set(v) end }),
+    }),
+    card("滑块 / 分段 / 下拉", {
+      text("音量: " .. tostring(math.floor(sld.get()))),
+      slider({ value = sld.get(), min = 0, max = 100, onChanged = function(v) sld.set(v) end }),
+      spacer(6),
+      segmented({ value = seg.get(),
+        options = { { label = "日", value = "a" }, { label = "周", value = "b" }, { label = "月", value = "c" } },
+        onChanged = function(v) seg.set(v) end }),
+      spacer(10),
+      select({ title = "语言", value = sel.get(),
+        options = { { label = "简体中文", value = "cn" }, { label = "English", value = "en" }, { label = "日本語", value = "jp" } },
+        onChanged = function(v) sel.set(v) end }),
+    }),
+    card("输入框", {
+      textfield({ label = "说点什么", hint = "输入后回显", value = echo.get(),
+        onChanged = function(v) echo.set(v) end }),
+      spacer(6),
+      text(echo.get() == "" and "(尚未输入)" or ("你输入了: " .. echo.get()), { color = "grey" }),
+    }),
+  }, { gap = 12 })
+end
+
+local function gallery_layout()
+  local boxes = {}
+  local palette = { "red", "orange", "amber", "green", "teal", "blue", "indigo", "purple" }
+  for i, c in ipairs(palette) do
+    boxes[i] = box({ height = 54, child = center(text(c, { color = "white", size = 11 })),
+      style = { bg = c, radius = 10 } })
+  end
+  return column({
+    card("网格 grid", {
+      grid(boxes, { columns = 4, gap = 8, ratio = 1.2 }),
+    }),
+    card("流式 wrap", {
+      wrap((function()
+        local t = {}
+        for _, s in ipairs({ "Lua", "Flutter", "love2d", "SQLite", "HTTP", "WebSocket", "Agent", "Sandbox" }) do
+          t[#t + 1] = chip(s, { color = "primary" })
+        end
+        return t
+      end)(), { spacing = 8, runSpacing = 8 }),
+    }),
+    expansion("可展开面板 expansion", {
+      text("expansion 里可以放任意内容,点标题展开/收起。"),
+      spacer(6),
+      tile("子项 A", { icon = "circle", subtitle = "说明" }),
+      tile("子项 B", { icon = "circle", subtitle = "说明" }),
+    }, { icon = "expand_more" }),
+    card("数据表 datatable", {
+      datatable({
+        headers = { "组件", "用途" },
+        rows = {
+          { "card", "毛玻璃卡片" },
+          { "grid", "网格布局" },
+          { "list", "虚拟化列表" },
+          { "tabs", "页内多标签" },
+        },
+      }),
+    }),
+  }, { gap = 12 })
+end
+
+local function gallery_feedback()
+  return column({
+    card("轻提示 / 对话框", {
+      wrap({
+        button("Toast", function() host.toast("这是一条 toast") end, { variant = "tonal" }),
+        button("确认框", function()
+          host.confirm("确定执行该操作?", function(yes) host.toast(yes and "已确认" or "已取消") end,
+            { title = "请确认", ok_text = "执行" })
+        end, { variant = "tonal" }),
+        button("输入框", function()
+          host.input({ title = "输入名称", hint = "在此输入", default = "" },
+            function(t) if t then host.toast("你输入: " .. t) end end)
+        end, { variant = "tonal" }),
+      }, { spacing = 8, runSpacing = 8 }),
+    }),
+    card("自定义对话框 / 底部菜单", {
+      wrap({
+        button("Dialog", function()
+          host.dialog({
+            title = "自定义对话框",
+            build = function() return column({ text("对话框内容可放任意组件:"), spacer(6), progress(0.6) }) end,
+            actions = {
+              { label = "取消", variant = "text" },
+              { label = "好的", variant = "filled", onTap = function() host.toast("ok") end },
+            },
+          })
+        end, { variant = "tonal" }),
+        button("Sheet", function()
+          host.sheet({ title = "更多操作", items = {
+            { label = "分享", icon = "share", onTap = function() host.toast("分享") end },
+            { label = "编辑", icon = "edit", onTap = function() host.toast("编辑") end },
+            { label = "删除", icon = "delete", danger = true, onTap = function() host.toast("删除") end },
+          } })
+        end, { variant = "tonal" }),
+      }, { spacing = 8, runSpacing = 8 }),
+    }),
+    card("系统通知", {
+      text("推送到状态栏, 点击可拉起 App。", { size = 13, color = "grey" }),
+      spacer(8),
+      button("发送通知", function()
+        host.notify{ title = "Android DIY Sandbox", body = "这是一条来自 Lua 的通知 · " .. os.date("%H:%M:%S") }
+        host.toast("已发送到状态栏")
+      end, { icon = "notifications_active_outlined" }),
+    }),
+  }, { gap = 12 })
+end
+
+app.page("gallery", function()
+  local t = state("gallery.tab", 1)
+  local dynrev = state("gallery.dynrev", 0)   -- 触发动态槽位重建
+  local function refresh() dynrev.set(dynrev.get() + 1) end
+
+  local dyn_content
+  if dyn_current and dyn_current.build then
+    dyn_content = column({
+      row({
+        button("返回", function() dyn_unload(); refresh() end, { variant = "text", icon = "arrow_back" }),
+        spacer(8),
+        expanded(text(dyn_current.title or "动态应用", { weight = "bold" })),
+        chip(dyn_current.unload == "back" and "后台续跑" or "切走即停",
+          { color = dyn_current.unload == "back" and "secondary" or "primary" }),
+      }, { cross = "center" }),
+      divider(),
+      box({ height = 300, child = dyn_current.build() }),
+    }, { gap = 8 })
+  else
+    local tiles = {}
+    for _, a in ipairs(DYN_APPS) do
+      tiles[#tiles + 1] = tile(a.label, {
+        icon = a.icon, subtitle = a.path:match("[^/]+$"),
+        trailing = icon("chevron_right", { color = "grey" }),
+        onTap = function() dyn_load(a.path); refresh() end,
+      })
+    end
+    dyn_content = column({
+      card({
+        text("动态加载 loadlua", { weight = "bold" }),
+        text("按需加载独立 .lua 模块, 用完卸载: 不常驻内存、不污染主脚本。切走标签会依模块声明暂停或续跑。",
+          { size = 12, color = "grey" }),
+      }),
+      card(tiles),
+    }, { gap = 12 })
+  end
+
   return tabs({
-    active = tab.get(),
-    keepalive = false,
-    onSelect = function(i) tab.set(i) end,
+    active = t.get(),
+    onSelect = function(i) t.set(i) end,
     items = {
-      { title = "旋转三角", icon = "change_history", content =
-        love{ id = 2, game = SCRIPTS.."/games/demo", keepalive = true, freeze = true } },
-      { title = "跑酷", icon = "directions_run", content =
-        love{ id = 3, game = SCRIPTS.."/games/runner", keepalive = false } },
+      { title = "基础", icon = "text_fields",
+        content = lifecycle({ child = gallery_basic(), onShow = typer_start, onHide = typer_stop }) },
+      { title = "交互", icon = "touch_app",       content = gallery_interactive() },
+      { title = "布局", icon = "dashboard",       content = gallery_layout() },
+      { title = "反馈", icon = "notifications",   content = gallery_feedback() },
+      { title = "动态", icon = "dashboard_customize_outlined",
+        content = lifecycle({ child = dyn_content, onHide = dyn_hide, onShow = dyn_show }) },
     },
   })
 end)
 
 -- ============================================================
--- 动态应用页 (loadlua 演示 · 方式二): 浏览 apps/ 下任意脚本, 选中即整屏渲染。
--- apps/ 下每个脚本 return { title=显示名, build=function(ctx) return 组件 end,
---   dispose=function() end (可选, 纯 Lua 应用在此清理定时器/资源) }。
---
--- 生命周期: 每次【进入/切换】一个应用都全新 loadlua 加载 (状态从头开始);
--- 【返回选择界面】或【切换到别的应用】时调用上一个的 dispose 释放资源。
--- (love 应用用 keepalive=false 由进程销毁自动释放; 纯 Lua 应用靠 dispose。)
+-- 网络 network: HTTP / WebSocket / 通知 / 工具箱
 -- ============================================================
-local current_module = nil     -- 当前选中应用的模块实例 (每次进入全新加载)
-local current_app_path = nil
+local ws_handle = nil
 
-local function unload_current_app()
-  if current_module and type(current_module.dispose) == "function" then
-    pcall(current_module.dispose)
-  end
-  current_module = nil
-  current_app_path = nil
-end
+app.page("network", function()
+  local url = state("net.url", "https://www.baidu.com")
+  local wsurl = state("net.wsurl", host.ws_echo_url() or "wss://echo.websocket.events")
+  local wsin = state("net.wsin", "hello sandbox")
+  local tin  = state("net.toolin", "sandbox")
 
-app.page("dynamic_apps", function(ctx)
-  local dir = SCRIPTS .. "/apps"
-  local apps = {}
-  for _, e in ipairs(host.list_dir(dir)) do
-    if not e.isDir and e.name:match("%.lua$") then
-      apps[#apps + 1] = { file = e.name, path = e.path }
-    end
-  end
-  table.sort(apps, function(a, b) return a.file < b.file end)
+  reactive("net.http", "点「发送」发起 GET 请求")
+  reactive("net.ws", "(未连接)")
+  reactive("net.wsstate", "未连接")
 
-  local sel = state("dynapp.sel", nil)
-
-  if not sel.get() then
-    -- 返回选择界面: 停掉并丢弃当前应用, 下次进入将全新加载 (从头开始)
-    unload_current_app()
-    local kids = {
-      padding(text("选择一个整屏应用/游戏加载", { weight = "bold", size = 16 }), 4),
-      text("把任意 .lua 放进 apps/ 即出现在这里 (return {title=, build=, dispose=})",
-        { color = "grey", size = 12 }),
-      divider(),
+  local function do_http()
+    reactive("net.http").set("请求中…")
+    host.http{
+      url = url.get(), method = "GET", timeout = 20,
+      on_done = function(res)
+        local b = tostring(res.body or "")
+        if #b > 600 then b = b:sub(1, 600) .. "\n…(已截断)" end
+        reactive("net.http").set("HTTP " .. tostring(res.status) .. "\n" .. b)
+      end,
+      on_error = function(err) reactive("net.http").set("错误: " .. tostring(err)) end,
     }
-    for _, a in ipairs(apps) do
-      local m = loadlua(a.path)   -- 仅用于取标题 (一次性, build 未调用 → 无副作用)
-      local title = (type(m) == "table" and m.title) or a.file
-      kids[#kids + 1] = tile(title, {
-        subtitle = a.file,
-        icon = "widgets_outlined",
-        trailing = icon("chevron_right"),
-        onTap = function() sel.set(a.path) end,
-      })
-    end
-    if #apps == 0 then
-      kids[#kids + 1] = padding(text("apps/ 为空", { color = "grey" }), 8)
-    end
-    return kids
   end
 
-  -- 进入或切换到某应用: 与当前不同则先 dispose 旧的, 再全新加载新的 (状态从头)
-  if current_app_path ~= sel.get() then
-    unload_current_app()
-    current_app_path = sel.get()
-    current_module = loadlua(current_app_path)
+  local function ws_connect()
+    if ws_handle then pcall(function() ws_handle:close() end); ws_handle = nil end
+    reactive("net.ws").set("")
+    reactive("net.wsstate").set("连接中…")
+    ws_handle = host.websocket{
+      url = wsurl.get(),
+      on_open = function() reactive("net.wsstate").set("已连接") end,
+      on_message = function(data) reactive("net.ws").set(tostring(data)) end,
+      on_close = function() reactive("net.wsstate").set("已关闭") end,
+      on_error = function(e) reactive("net.wsstate").set("错误: " .. tostring(e)) end,
+    }
   end
 
-  local m = current_module
-  local title = "应用"
-  local body = text("加载失败, 见日志", { color = "grey" })
-  if type(m) == "table" and m.build then
-    title = m.title or "应用"; body = m.build(ctx)
-  elseif m then
-    body = m
-  end
-
-  local header = {
-    row({
-      iconbutton("arrow_back", function() sel.set(nil) end, { tooltip = "返回选择" }),
-      expanded(text(title, { weight = "bold", size = 16 })),
-      iconbutton("apps", function() sel.set(nil) end, { tooltip = "切换应用" }),
-    }, { cross = "center" }),
-    divider(),
-    expanded(body),
+  local tool = tin.get()
+  return {
+    section("HTTP 请求", {
+      card({
+        textfield({ label = "URL", value = url.get(), onChanged = function(v) url.set(v) end }),
+        spacer(8),
+        row({
+          button("发送 GET", do_http, { icon = "download" }),
+          spacer(8),
+          button("清空", function() reactive("net.http").set("") end, { variant = "text" }),
+        }),
+        spacer(10),
+        box({ height = 180, child = scroll({ text("", { bind = "net.http", size = 12 }) }),
+          style = { bg = "#11000000", radius = 10, padding = 10 } }),
+      }),
+    }),
+    section("WebSocket (echo 回声)", {
+      card({
+        row({ icon("bolt", { color = "teal" }), spacer(6),
+          expanded(text("", { bind = "net.wsstate", color = "grey" })) }, { cross = "center" }),
+        spacer(8),
+        textfield({ label = "服务地址 (wss://)", value = wsurl.get(), onChanged = function(v) wsurl.set(v) end }),
+        spacer(8),
+        textfield({ label = "发送内容", value = wsin.get(), onChanged = function(v) wsin.set(v) end }),
+        spacer(8),
+        wrap({
+          button("连接", ws_connect, { variant = "tonal", icon = "link" }),
+          button("发送", function()
+            if ws_handle then ws_handle:send(wsin.get()) else host.toast("请先连接") end
+          end, { icon = "send" }),
+          button("断开", function()
+            if ws_handle then ws_handle:close(); ws_handle = nil end
+          end, { variant = "text" }),
+        }, { spacing = 8, runSpacing = 8 }),
+        spacer(10),
+        text("收到: ", { size = 12, color = "grey" }),
+        text("", { bind = "net.ws" }),
+        spacer(6),
+        text("默认已指向 App 内置的本地回声服务器 (ws://127.0.0.1), 无需外网即可连通。",
+          { size = 11, color = "grey" }),
+      }),
+    }),
+    section("工具箱 (哈希 / 编码)", {
+      card({
+        textfield({ label = "输入文本", value = tool, onChanged = function(v) tin.set(v) end }),
+        spacer(8),
+        datatable({
+          headers = { "算法", "结果" },
+          rows = {
+            { "md5",    host.md5(tool) },
+            { "sha256", (host.sha256(tool)):sub(1, 32) .. "…" },
+            { "base64", host.base64_encode(tool) },
+            { "uuid",   host.uuid() },
+          },
+        }),
+      }),
+    }),
   }
-
-  -- 每个 app 自己声明卸载/暂停时机 m.unload:
-  --   "hidden" → 切走 nav/tab 或退后台时调用 m.pause() 暂停, 回来调用 m.resume() 继续
-  --              (确定性、无重建竞态; app 的 resume 可选择"继续"或"从头")。
-  --   "back"(默认) → nav/tab 切走时在后台继续跑; 只有【返回/切到别的 app】才 dispose 停掉。
-  -- 两种模式下, 【返回选择界面再进入】都会全新加载 → 从头开始。
-  local unload_mode = (type(m) == "table" and m.unload) or "back"
-  if unload_mode == "hidden" then
-    return lifecycle{
-      fill = true,
-      onHide = function()
-        if type(m) == "table" and type(m.pause) == "function" then pcall(m.pause) end
-      end,
-      onShow = function()
-        if type(m) == "table" and type(m.resume) == "function" then pcall(m.resume) end
-      end,
-      child = column(header, { cross = "stretch" }),
-    }
-  end
-  return column(header, { cross = "stretch", fill = true })
 end)
 
--- 主页顶栏的两个 Agent 入口按钮已移至受保护的 agent/main.lua,
--- 与本文件解耦: 即使这里被改坏, agent 启动入口依然稳定存在。
+-- ============================================================
+-- 文件 files: 浏览 / 读写 / 持久化 / SQLite / 共享存储
+-- ============================================================
+local todo_db = store.open("demo_todo")
+todo_db.exec[[CREATE TABLE IF NOT EXISTS todo(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, done INT DEFAULT 0, ts INT)]]
+
+app.page("files", function()
+  local cwd  = state("files.cwd", SCRIPTS)
+  local note = state("files.note", host.read_file(host.home_path() .. "/sandbox_demo.txt") or "")
+
+  -- 文件浏览器
+  local entries = host.list_dir(cwd.get()) or {}
+  table.sort(entries, function(a, b)
+    if a.isDir ~= b.isDir then return a.isDir end
+    return tostring(a.name) < tostring(b.name)
+  end)
+  local rows = {}
+  if cwd.get() ~= SCRIPTS then
+    rows[#rows + 1] = tile("..", { icon = "arrow_upward", onTap = function()
+      cwd.set((cwd.get()):gsub("/[^/]+$", ""))
+    end })
+  end
+  for _, e in ipairs(entries) do
+    rows[#rows + 1] = tile(tostring(e.name), {
+      icon = e.isDir and "folder" or "insert_drive_file_outlined",
+      subtitle = e.isDir and "目录" or nil,
+      onTap = function()
+        if e.isDir then
+          cwd.set(e.path)
+        else
+          open_file_viewer(e.name, e.path)
+        end
+      end,
+    })
+  end
+
+  -- 持久化计数器
+  local cnt = tonumber(host.get("demo.counter")) or 0
+
+  -- SQLite 待办
+  local todos = todo_db.query("SELECT * FROM todo ORDER BY id DESC")
+  local todo_rows = {}
+  for _, r in ipairs(todos) do
+    local done = tostring(r.done) == "1"
+    todo_rows[#todo_rows + 1] = tile(tostring(r.text), {
+      icon = done and "check_box" or "check_box_outline_blank",
+      trailing = iconbutton("delete_outline", function()
+        todo_db.run("DELETE FROM todo WHERE id=?", { r.id })
+        host.toast("已删除")
+      end),
+      onTap = function()
+        todo_db.run("UPDATE todo SET done=? WHERE id=?", { done and 0 or 1, r.id })
+      end,
+    })
+  end
+
+  return {
+    section("脚本目录浏览器", {
+      card({
+        text(cwd.get(), { size = 11, color = "grey", maxLines = 2, ellipsis = true }),
+        divider(),
+        box({ height = 240, child = list(rows, { scroll = true }) }),
+      }),
+    }),
+    section("读写文本文件", {
+      card({
+        text("落盘到 " .. host.home_path() .. "/sandbox_demo.txt", { size = 11, color = "grey" }),
+        spacer(6),
+        textfield({ label = "内容", value = note.get(), onChanged = function(v) note.set(v) end }),
+        spacer(8),
+        row({
+          button("保存", function()
+            host.write_file(host.home_path() .. "/sandbox_demo.txt", note.get())
+            host.toast("已保存")
+          end, { icon = "save_outlined" }),
+          spacer(8),
+          button("读取", function()
+            local p = host.home_path() .. "/sandbox_demo.txt"
+            local body = host.read_file(p)
+            if not body then host.toast("文件不存在, 请先保存"); return end
+            note.set(body)
+            host.dialog({
+              title = "读取内容",
+              build = function()
+                return box({ height = 300, child = scroll({
+                  text(#body > 0 and body or "(空文件)", { size = 13 }),
+                }) })
+              end,
+              actions = { { label = "关闭", variant = "text" } },
+            })
+          end, { variant = "tonal" }),
+        }),
+      }),
+    }),
+    section("持久化键值 (重启仍在)", {
+      card({
+        row({
+          expanded(text("计数器: " .. cnt, { size = 18, weight = "bold" })),
+          iconbutton("remove", function() host.set("demo.counter", cnt - 1) end),
+          iconbutton("add", function() host.set("demo.counter", cnt + 1) end),
+        }, { cross = "center" }),
+        text("host.set/get · 存于原生设置", { size = 11, color = "grey" }),
+      }),
+    }),
+    section("SQLite 待办", {
+      card({
+        row({
+          expanded(text("共 " .. #todos .. " 条", { color = "grey" })),
+          button("添加", function()
+            host.input({ title = "新待办", hint = "要做什么?" }, function(t)
+              if t and t ~= "" then
+                todo_db.run("INSERT INTO todo(text,ts) VALUES(?,?)", { t, os.time() })
+                host.toast("已添加")
+              end
+            end)
+          end, { icon = "add", variant = "tonal" }),
+        }, { cross = "center" }),
+        divider(),
+        (#todo_rows > 0) and column(todo_rows, { gap = 2 }) or text("(点「添加」新建)", { color = "grey" }),
+      }),
+    }),
+    section("原生共享存储", {
+      card({
+        text("根目录: " .. tostring(host.storage_path()), { size = 12, color = "grey" }),
+        spacer(8),
+        button("写入 Download/sandbox_hello.txt", function()
+          local p = host.storage_path() .. "/Download/sandbox_hello.txt"
+          host.write_file(p, "Hello from Android DIY Sandbox · " .. os.date())
+          host.toast("已写入 (首次会弹权限申请)")
+        end, { icon = "sd_storage_outlined", variant = "tonal" }),
+      }),
+    }),
+  }
+end)
+
+-- ============================================================
+-- 游戏 games: love2d 画布 + 生命周期演示
+-- ============================================================
+app.page("games", function()
+  local t = state("games.tab", 1)
+  reactive("game.score", "0")
+  return tabs({
+    active = t.get(),
+    keepalive = false,   -- 切走标签即卸载子树: 配合 love{keepalive=false} 真正销毁进程
+    onSelect = function(i) t.set(i) end,
+    items = {
+      {
+        title = "动画", icon = "auto_awesome",
+        content = column({
+          card({ text("旋转多边形 · freeze=true", { weight = "bold" }),
+            text("切走导航页 → 冻结, 回来从快照继续 (时钟不跳变)。", { size = 12, color = "grey" }) }),
+          love{ id = 0, game = SCRIPTS .. "/games/demo", height = 320, freeze = true },
+        }, { gap = 10 }),
+      },
+      {
+        title = "跑酷", icon = "directions_run",
+        content = column({
+          card({
+            row({
+              expanded(column({
+                text("点击屏幕跳跃 · keepalive=false", { weight = "bold" }),
+                text("切到「动画」标签 → 进程销毁, 回来全新开始。", { size = 12, color = "grey" }),
+              })),
+              text("得分", { size = 13, color = "grey" }),
+              spacer(6),
+              text("", { bind = "game.score", size = 22, weight = "bold", color = "primary" }),
+            }, { cross = "center" }),
+          }),
+          love{
+            id = 1, game = SCRIPTS .. "/games/runner", height = 320, keepalive = false,
+            onEvent = function(msg)
+              if type(msg) == "table" then
+                local v = (msg.data and msg.data.value) or msg.value or (msg.data and msg.data.score) or msg.score
+                if type(v) == "number" then reactive("game.score").set(tostring(math.floor(v))) end
+              end
+            end,
+          },
+          button("重开", function() love.send(1, "reset") end, { icon = "refresh", variant = "tonal" }),
+        }, { gap = 10 }),
+      },
+    },
+  })
+end)

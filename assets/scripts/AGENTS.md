@@ -10,21 +10,20 @@
 scripts/
   main.lua          用户主脚本 (入口, 自由定制: 导航/页面/组件)
   agent/main.lua    Agent 入口 (用户可见可改, 但一般不必动; 独立且受保护地加载)
-  agent/app-reload  命令行工具: 改完脚本后触发 App 重载 (bash agent/app-reload)
+  agent/sandbox     命令行工具集: reload / ping / run / log (改完脚本触发重载、隔离试跑、看日志)
   AGENTS.md         本文档
-  games/            love 小游戏 (每个子目录一个 main.lua)
+  ...               其余 .lua 模块 / 资源 / love 工程目录, 由你自由组织
 ```
 
 > love 游戏↔UI 的通信桥(`love_host.lua`)由 App 在运行时自动、隐蔽地提供(不落在本工作区),
 > 游戏里直接 `require("love_host")` 即可用,无需你创建或维护它。
 
 - **`main.lua` 是你主要编辑的文件。** 即使把它改崩,`agent/main.lua`(独立、受保护地先行加载)
-  注册的两个 Agent 入口按钮(顶栏最左)仍在,不受影响。
+  注册的两个 Agent 入口按钮(主页顶栏右侧、设置齿轮左边的两枚)仍在,不受影响。
 - 全局变量 `SCRIPTS` = 本目录绝对路径(用于拼 game 路径等)。
-- **应用脚本更改**:主页顶栏刷新图标重载(损坏会自动回退快照,15s 倒计时可保留/回退);
-  Agent 也可在命令行 `bash agent/app-reload` 主动触发同样的重载(见「十二」)。
-- **导入 / 导出**:设置页顶栏两个图标,以 zip 形式导出/替换**整个本目录**(脚本+文档一起)。
-- **引擎**:LuaJIT 2.1,完整标准库(`string/table/math/os/io/bit/ffi/coroutine`)全部可用。
+ - **应用脚本更改**:主页顶栏刷新图标重载(损坏会自动回退快照,15s 倒计时可保留/回退);
+   Agent 也可在命令行 `bash agent/sandbox reload` 主动触发同样的重载(见「十二」)。
+ - **引擎**:LuaJIT 2.1,完整标准库(`string/table/math/os/io/bit/ffi/coroutine`)全部可用。
 
 ---
 
@@ -70,12 +69,12 @@ reply.set(reply.get() .. token)       -- 每次只重绘这一个 Text
 
 导航栏由 `nav.tabs` 定义。每个 tab 的 `page` 有四种取值:
 
-| page 取值        | 页面类型                                                     |
-| ---------------- | ------------------------------------------------------------ |
-| `"home"`       | 内置主页(唯一带固定齿轮设置入口)                             |
-| `terminal()`   | 内置终端页                                                   |
-| `webview()`    | 内嵌网页标签(默认空白;用 `host.webview_open(url, title)` 打开具体网页) |
-| `"任意页面名"` | 用`app.page` 注册的自定义页面(设置页、游戏页、AI 应用页…) |
+| page 取值        | 页面类型                                                                |
+| ---------------- | ----------------------------------------------------------------------- |
+| `"home"`       | 内置主页(唯一包括顶栏以及置入口)                                        |
+| `terminal()`   | 内置终端页                                                              |
+| `webview()`    | 内嵌网页标签(默认空白;用`host.webview_open(url, title)` 打开具体网页) |
+| `"任意页面名"` | 用`app.page` 注册的自定义页面(设置页、游戏页、AI 应用页…)            |
 
 ```lua
 nav.tabs({
@@ -141,6 +140,10 @@ end)
 默认全部标签常驻(切换只挂起、保留状态);`tabs({ keepalive=false })` 则只挂载当前标签、切走即卸载
 ——配合 `love{keepalive=false}` 可实现"切标签销毁另一个游戏进程"。
 
+> **标签内容自动滚动**:每个标签的 `content` 默认套一层可滚动容器(超出视口不会溢出),行为等同一个页面。
+> 若某标签要**铺满**(整块 `love` 画布、`list` 虚拟长列表、或需要内部 `expanded`),把该 `content` 设为
+> 填充型即可(`love{}` / `list(...)` / 嵌套 `tabs` / 根组件加 `fill=true`),框架会跳过滚动容器让它占满。
+
 ### 主页顶栏自定义按钮
 
 主页右上角(设置齿轮左侧)可放自定义图标按钮:
@@ -152,7 +155,7 @@ app.actions({
 })
 ```
 
-> 顺序为:Agent 入口按钮(来自受保护的 `agent/main.lua`,最左)→ 你的 `app.actions` 按钮 → 设置齿轮。
+> 主页顶栏按钮均在右侧,从左到右顺序为:Agent 入口按钮(来自受保护的 `agent/main.lua`)→ 你的 `app.actions` 按钮 → 设置齿轮(最右)。
 > **不要**把 Agent 启动入口写进 `main.lua`——它已在 `agent/main.lua`,那里用 `app.agent_actions({...})` 注册,
 > 与用户脚本解耦,不会被 `main.lua` 覆盖或弄丢。
 
@@ -188,11 +191,15 @@ app.actions({
 > **长列表虚拟化**:聊天/信息流等超长列表用 `list(items, {scroll=true})`,只建可视项,千万项也流畅;
 > 通常放进有界高度容器(如 `box({height=300, child=list(...)})`)。普通 `column`/`row` 会全量构建。
 
+> **`row` 里放会变长的文本要 `expanded`**:`row` 给子组件的是无限宽度,直接放一段可能变长的 `text`
+> (状态、错误信息、用户输入回显)会**右侧溢出**。用 `expanded(text(...))` 包住让它在行内换行/省略。
+
 ### 内容
 
 | 构造                                                                      | 说明                                                                                  |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | `text(s, {size,weight,color,align,maxLines,ellipsis,bind})`             | 文本。`bind="reactiveKey"` 时内容跟随 `reactive(key)` 实时刷新(流式,只重绘本组件) |
+| `markdown(s, {selectable})`                                             | 渲染 Markdown(标题/列表/代码块/加粗/链接等);链接点击自动外部打开                      |
 | `richtext({ {text,color,weight,size,italic,underline}, ... }, {align})` | 富文本(多段)                                                                          |
 | `icon(name, {size,color})`                                              | 图标(见[图标](#四图标))                                                                |
 | `avatar({image,icon,text,radius,color})`                                | 头像                                                                                  |
@@ -225,12 +232,12 @@ app.actions({
 
 ### 容器
 
-| 构造                                           | 说明                                 |
-| ---------------------------------------------- | ------------------------------------ |
-| `card(title, children)` / `card(children)` | 毛玻璃卡片                           |
-| `section(title, children)`                   | 带标题分组                           |
-| `expansion(title, children, {icon})`         | 可展开面板                           |
-| `tabs({...})`                                | 页内多标签(见[第一部分](#页内多标签)) |
+| 构造                                              | 说明                                                     |
+| ------------------------------------------------- | -------------------------------------------------------- |
+| `card(title, children)` / `card(children)`    | 毛玻璃卡片                                               |
+| `section(title, children)`                      | 带标题分组                                               |
+| `expansion(title, children, {icon})`            | 可展开面板                                               |
+| `tabs({...})`                                   | 页内多标签(见[第一部分](#页内多标签))                     |
 | `lifecycle({child, onShow, onHide, onDispose})` | 可见性生命周期包裹(见[动态加载](#十一动态加载与生命周期)) |
 
 ---
@@ -278,23 +285,23 @@ icon(0xe88a)            -- 也可直接用 codepoint
 不是覆盖层,而是原生地参与排版:可随页面一起滚动、拉伸,与任何其它组件同层摆放。
 
 ```lua
-love{ id = 0, game = SCRIPTS.."/games/demo" }
+love{ id = 0, game = SCRIPTS.."/games/mygame" }
 ```
 
-| 属性                 | 说明                                                                                    |
-| -------------------- | --------------------------------------------------------------------------------------- |
-| `id`               | 画布标识**0..3,必须唯一**。每个 id 是一块独立实例(独立进程),同屏多块须各用不同 id |
-| `game`             | love2d 工程目录绝对路径(内含`main.lua`)                                               |
-| `width`/`height` | 尺寸;作为普通元素时 height 默认 200                                                     |
-| `autopause`        | 默认`true`:切走导航页自动挂起(停渲染、留内存、不丢状态)                             |
-| `keepalive`        | 默认`true`:移除时只挂起保留;`false` 则销毁进程,下次挂载全新启动                        |
+| 属性                 | 说明                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `id`               | 画布标识**0..3,必须唯一**。每个 id 是一块独立实例(独立进程),同屏多块须各用不同 id                               |
+| `game`             | love2d 工程目录绝对路径(内含`main.lua`)                                                                             |
+| `width`/`height` | 尺寸;作为普通元素时 height 默认 200                                                                                   |
+| `autopause`        | 默认`true`:切走导航页自动挂起(停渲染、留内存、不丢状态)                                                             |
+| `keepalive`        | 默认`true`:移除时只挂起保留;`false` 则销毁进程,下次挂载全新启动                                                   |
 | `freeze`           | 默认`false`:挂起时按真实时间推进(回来追补流逝);`true` 冻结游戏时钟、回来从快照续(游戏需 `require("love_host")`) |
-| `onEvent`          | `function(msg)`:收到游戏发来的消息(表)时回调(见下「双向通信」)                        |
+| `onEvent`          | `function(msg)`:收到游戏发来的消息(表)时回调(见下「双向通信」)                                                      |
 
 `game` 指向一个标准 love2d 工程,`main.lua` 里实现 love 回调(触摸已从 Flutter 转发):
 
 ```lua
--- SCRIPTS/games/demo/main.lua
+-- SCRIPTS/games/mygame/main.lua
 function love.update(dt) ... end
 function love.draw() love.graphics.print("hi", 8, 8) end
 function love.touchpressed(id, x, y) ... end
@@ -339,8 +346,8 @@ app.page("games", function()
   return tabs({
     active = t.get(), onSelect = function(i) t.set(i) end,
     items = {
-      { title="旋转三角", icon="change_history", content = love{ id=2, game=SCRIPTS.."/games/demo" } },
-      { title="跑酷",     icon="directions_run", content = love{ id=3, game=SCRIPTS.."/games/runner" } },
+      { title="旋转三角", icon="change_history", content = love{ id=2, game=SCRIPTS.."/games/mygame" } },
+      { title="跑酷",     icon="directions_run", content = love{ id=3, game=SCRIPTS.."/games/mygame2" } },
     },
   })
 end)
@@ -351,7 +358,7 @@ end)
 ```lua
 card("今日", {
   row({
-    love{ id=0, width=120, height=120, game=SCRIPTS.."/games/demo" },
+    love{ id=0, width=120, height=120, game=SCRIPTS.."/games/mygame" },
     spacer(12),
     expanded(text("一段说明文字……")),
   }),
@@ -430,12 +437,13 @@ ws:close()
 | `host.hmac_sha256(key, data, b64?)` / `host.hmac_sha1(...)`     | 便捷别名                                                                                        |
 | `host.random_bytes(n, fmt?)`                                      | 随机字节;fmt:`hex`(默认)/`b64`/`raw`                                                      |
 | `host.uuid()`                                                     | UUID v4                                                                                         |
+| `host.now_ms()`                                                   | 单调毫秒时间戳(测速/计时用,`结束-开始` 得毫秒耗时)                                            |
 | `host.interval(ms, cb)` → id / `host.clear_interval(id)`       | 重复定时器                                                                                      |
 | `host.device_info()`                                              | `{platform,osVersion,locale,screenW,screenH,dpr,darkMode, appVersion,model,brand,sdkInt,...}` |
 
 > 时间/随机也可直接用 Lua 标准库:`os.time()`、`os.date("%Y-%m-%d")`、`math.random()`。
 >
-> **重载自动清理**:刷新键 / `app-reload` 会自动取消上一轮的 `host.interval` 及在途 `http`/`websocket`,
+> **重载自动清理**:刷新键 / `sandbox reload` 会自动取消上一轮的 `host.interval` 及在途 `http`/`websocket`,
 > 不泄漏;同一轮内不用的定时器仍需自己 `host.clear_interval`。
 
 ---
@@ -500,10 +508,10 @@ host.sheet({ title="更多", items = {
 | `host.exists(p)` / `host.delete_file(p)` / `host.delete_dir(p)`                                             | 文件操作                                                                  |
 | `host.list_dir(p)` → `{{name,path,isDir},...}` / `host.mkdirs(p)`                                          | 目录                                                                      |
 | `host.home_path()` / `host.ubuntu_path()` / `host.bin_path()` / `host.tmp_path()` / `host.backup_dir()` | 常用路径                                                                  |
-| `host.storage_path()`                                                                                          | 原生共享存储根 (通常 `/storage/emulated/0`)                             |
+| `host.storage_path()`                                                                                           | 原生共享存储根 (通常`/storage/emulated/0`)                              |
 | `host.clipboard.copy(s)` / `host.clipboard.paste()`                                                           | 剪贴板                                                                    |
 | `host.open_url(url)` / `host.exit_app()`                                                                      | 外链 / 退出                                                               |
-| `host.webview_open(url, title?)`                                                                                | 在内嵌 WebUI 标签打开一个网页                                              |
+| `host.webview_open(url, title?)`                                                                                | 在内嵌 WebUI 标签打开一个网页                                             |
 | `host.exec(cmd, cb)`                                                                                            | 容器内执行并取回`cb({code,output})`                                     |
 | `host.container(cmd, cb)`                                                                                       | 容器内执行(不取输出)                                                      |
 | `host.spawn(cmd, title, key, cb)`                                                                               | 容器内跑长命令,流式输出到终端 tab;`key` 跟踪运行态                      |
@@ -541,7 +549,7 @@ host.sheet({ title="更多", items = {
 `build` 返回 UI,`dispose`/`pause`/`resume` 供加载方控制其生命周期(见下节):
 
 ```lua
--- apps/hello.lua (无需注册)
+-- mymodule.lua (无需注册)
 return {
   title = "Hello",
   build = function(ctx)
@@ -573,7 +581,7 @@ end
 app.page("host", function(ctx)
   return {
     row({
-      button("加载", function() load_mod(SCRIPTS .. "/apps/hello.lua") end),
+      button("加载", function() load_mod(SCRIPTS .. "/mymodule.lua") end),
       button("卸载", unload_mod, { variant = "tonal" }),
     }, { gap = 8 }),
     divider(),
@@ -589,17 +597,17 @@ end)
 内容"不可见时(切走导航页 / 切走标签 / 退后台)怎么办"分三态。**渲染永远只在可见时进行**,
 下表只决定**内核/逻辑**的去留。love 画布用属性,纯 Lua 内容用 `lifecycle{}` 包裹,两者一一对应:
 
-| 不可见时 | love 画布 | 纯 Lua 内容 |
-| --- | --- | --- |
-| **运行** 后台继续跑 | `love{ freeze=false }`(默认) | 不包 `lifecycle` |
-| **冻结** 暂停,回来接着 | `love{ freeze=true }` | `lifecycle{ onHide=停, onShow=启 }` |
-| **销毁** 停掉释放,回来从头 | `love{ keepalive=false }` | `lifecycle{ onHide=停并归零 }` |
+| 不可见时                         | love 画布                      | 纯 Lua 内容                           |
+| -------------------------------- | ------------------------------ | ------------------------------------- |
+| **运行** 后台继续跑        | `love{ freeze=false }`(默认) | 不包`lifecycle`                     |
+| **冻结** 暂停,回来接着     | `love{ freeze=true }`        | `lifecycle{ onHide=停, onShow=启 }` |
+| **销毁** 停掉释放,回来从头 | `love{ keepalive=false }`    | `lifecycle{ onHide=停并归零 }`      |
 
 **纯 Lua 应用没有独立进程**,跑在共享主 VM 里——移出界面只是停渲染,它的 `host.interval`/网络/`spawn`
 **会继续占资源**,必须靠回调主动停。把模块写成带 `pause`/`resume`/`dispose` 的应用,定时器 id 放模块级 upvalue:
 
 ```lua
--- apps/compute.lua 同款: 切走即停、回来从头
+-- 一个"切走即停、回来从头"的应用模块
 local timer, n = nil, 0
 local function tick() n = n + 1; reactive("compute").set("已算 " .. n .. " 轮") end
 local function start() if not timer then timer = host.interval(200, tick) end end
@@ -631,27 +639,36 @@ lifecycle{
 - **用确定性的 pause/resume**,不要在 `onShow` 里 `sel.set` 触发重建(会与 onHide 竞态,出现"有时从 0 有时从 9")。
 - 每个应用**每次进入都全新 `loadlua`**(状态从头),定时器只在模块 upvalue 里管理。
 
-> **脚本重载自动清理**:刷新键 / `app-reload` 时,上一轮的 `host.interval`、在途 `http`、`websocket`
+> **脚本重载自动清理**:刷新键 / `sandbox reload` 时,上一轮的 `host.interval`、在途 `http`、`websocket`
 > 由框架自动取消,不会泄漏;但同一轮内不用的定时器仍要自己 `host.clear_interval`。
-
-可运行示例:「动态」页的 `apps/compute.lua`(切走即停)、`apps/compute_bg.lua`(后台续跑)、
-`apps/mini_game.lua`(love,返回销毁)。
 
 ---
 
-## 十二、Agent 触发脚本重载(app-reload)
+## 十二、Agent 命令行工具集(agent/sandbox)
 
-Agent 在容器里改完 `.lua` 后,脚本**不会自动生效**(App 不做监视/轮询)。让改动立即生效有两种方式:
-用户点主页刷新键,或 **Agent 主动在命令行触发**一次重载(推荐给自动化流程):
+Agent 在容器里改完 `.lua` 后,脚本**不会自动生效**(App 不做监视/轮询)。统一工具 `agent/sandbox`
+通过本机回环控制通道与宿主 App 通信,涵盖开发调试常用操作:
 
 ```sh
-bash agent/app-reload          # 通知宿主 App 重新加载全部脚本
-bash agent/app-reload ping     # 探活(确认 App 在运行)
+bash agent/sandbox reload          # 重载全部脚本 (等同主页刷新键, 带快照保护; 失败自动回退上一版)
+bash agent/sandbox ping            # 探活 (确认 App 在运行)
+bash agent/sandbox run <file.lua>  # 在隔离引擎里试跑一个脚本 (语法/逻辑快速自测, 不影响在跑的 UI)
+bash agent/sandbox log [N]         # 查看最近 N 行 Lua 运行日志 (默认 100)
+bash agent/sandbox log -f [N]      # 持续跟随 Lua 运行日志
 ```
 
-原理:App 在本机回环起了一个控制通道,把 `端口/令牌` 写入 `agent/.control`;`app-reload` 读取后
-连上去发一条命令即可(用 bash 内建 `/dev/tcp`,不依赖 `nc`)。重载走的是与刷新键相同的**快照保护**
-流程:加载失败会自动回退到上一版可用脚本。
+- **run**:独立 `lua_State` 执行目标文件,只挂少量安全**只读**(路径/`read_file`/`list_dir`/`get`…)
+  + 工具箱(编码/哈希/`uuid`/`now_ms`/`device_info`…)接口;UI/注册/异步类调用(`app.page`/`nav.tabs`/
+  `host.spawn`/`host.http`/`host.dialog`/`love`…)一律视作 no-op,**不会污染正在运行的 UI**。
+  捕获 `print` / `host.log|warn|error` / `host.toast` 输出与加载/运行错误后回传;若脚本 `return` 的
+  模块表含 `build`,还会试运行一次 `build()` 以暴露运行期错误。适合"改完先 run 一下看能不能正常加载"。
+- **log**:读取 `agent/lua.log`——它是 App 内「Lua 日志」控制台的文件镜像(`host.log/warn/error`、
+  `print`、脚本加载/回调运行错误都汇聚于此),每次 App 启动/重载会重置。容器内即可 `tail` 查看。
+- 原理:App 在本机回环起控制通道,把 `端口/令牌` 写入 `agent/.control`;工具读取后用 bash 内建
+  `/dev/tcp` 连上发命令(不依赖 `nc`)。
+
+> 典型调试循环:`edit foo.lua` → `bash agent/sandbox run foo.lua`(看有无报错/输出)→
+> `bash agent/sandbox reload`(应用到 UI)→ `bash agent/sandbox log -f`(观察运行日志)。
 
 ---
 

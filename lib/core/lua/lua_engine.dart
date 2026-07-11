@@ -43,6 +43,10 @@ class LuaEngine {
   NativeCallable<LuaCFunctionNative>? _hostCallable;
   final Map<String, LuaHostHandler> _handlers = {};
 
+  /// 为 true 时, 未注册的 host 调用静默返回 nil (不写日志)。
+  /// 供隔离调试引擎使用: 只挂少量安全 handler, 其余 UI/注册类调用视作 no-op。
+  bool silentUnknown = false;
+
   bool get isOpen => _l != nullptr;
   Pointer<Void> get state => _l;
 
@@ -90,8 +94,10 @@ class LuaEngine {
       }
       final handler = _handlers[name];
       if (handler == null) {
-        debugPrint('[Lua] 未注册的 host 调用: $name');
-        LuaLog.instance.warn('未注册的 host 调用: $name');
+        if (!silentUnknown) {
+          debugPrint('[Lua] 未注册的 host 调用: $name');
+          LuaLog.instance.warn('未注册的 host 调用: $name');
+        }
         _lua.luaPushNil(l);
         return 1;
       }
@@ -280,14 +286,14 @@ class LuaEngine {
     });
     // table 往返 + 函数引用回调
     final ctx = {
-      'astrbot': {'running': true, 'port': 6185},
+      'service': {'running': true, 'port': 8080},
       'items': ['a', 'b', 'c'],
     };
     engine.registerHandler('get_ctx', (_) => ctx);
     final descriptor = engine.doString(
       'local c = __host_call("get_ctx")\n'
-      'local t = __host_call("toast", "hi "..tostring(c.astrbot.port))\n'
-      'return { tag="card", running=c.astrbot.running, n=#c.items, echo=t }',
+      'local t = __host_call("toast", "hi "..tostring(c.service.port))\n'
+      'return { tag="card", running=c.service.running, n=#c.items, echo=t }',
       chunkName: 'selftest',
     );
     engine.close();

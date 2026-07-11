@@ -149,7 +149,7 @@ class _TerminalTabViewState extends State<TerminalTabView> {
       final granted = await _ensureStoragePermission(context);
       if (!granted) return;
 
-      final dir = Directory('/storage/emulated/0/Download/AstrBotBubble');
+      final dir = Directory('/storage/emulated/0/Download/AndroidDIYSandbox');
       await dir.create(recursive: true);
       final timestamp = DateTime.now()
           .toIso8601String()
@@ -330,9 +330,7 @@ class _TerminalTabViewState extends State<TerminalTabView> {
                 TabStripItem(
                   id: t.id,
                   title: t.title,
-                  icon: t.type == TerminalTabType.fixed
-                      ? Icons.lock_outline
-                      : Icons.terminal,
+                  icon: Icons.terminal,
                 ),
             ],
             activeIndex: activeIndex,
@@ -374,7 +372,7 @@ class _TerminalTabViewState extends State<TerminalTabView> {
           child: TerminalView(
             tab.terminal,
             controller: tab.controller,
-            readOnly: tab.type == TerminalTabType.fixed,
+            readOnly: false,
             backgroundOpacity: 0,
             textStyle: TerminalStyle(fontSize: _terminalFontSize),
             theme: ManjaroTerminalTheme(),

@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/lua/lua_engine.dart';
 import '../../core/lua/love_bridge.dart';
@@ -609,6 +611,17 @@ class LuaRenderer {
       // 内容
       case 'text':
         return _text(context, node);
+      case 'markdown':
+        return MarkdownBody(
+          data: '${node['text'] ?? ''}',
+          selectable: node['selectable'] == true,
+          onTapLink: (text, href, title) {
+            if (href != null) {
+              final uri = Uri.tryParse(href);
+              if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          },
+        );
       case 'richtext':
         return _richText(context, node);
       case 'icon':
@@ -1199,6 +1212,28 @@ class LuaRenderer {
   }
 
   /// 通用多标签组件: TabStrip + 当前标签内容; 标签态由 Lua 管理 (active 为 1 基)。
+  // 判断组件是否"填充型"(自行管理尺寸/滚动, 不应被外层套滚动容器):
+  // love 画布 / 虚拟化 list / 嵌套 tabs / 显式 fill=true; lifecycle 透传看其 child。
+  bool _isFillLike(Object? desc) {
+    if (desc is! Map) return false;
+    if (desc['fill'] == true) return true;
+    final t = '${desc['__type']}';
+    if (t == 'love' || t == 'list' || t == 'tabs') return true;
+    if (t == 'lifecycle') return _isFillLike(desc['child']);
+    return false;
+  }
+
+  // 标签页内容体: 普通内容(列表/卡片流)默认套可滚动容器, 避免超出视口时底部溢出;
+  // 填充型内容(love/list/tabs/fill)保持直接填满, 由其自身管理尺寸与滚动。
+  Widget _tabBody(BuildContext context, Object? contentDesc) {
+    final w = build(context, contentDesc);
+    if (_isFillLike(contentDesc)) return w;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      child: w,
+    );
+  }
+
   Widget _tabs(BuildContext context, Map node) {
     final items = node['items'] is List ? node['items'] as List : const [];
     final count = items.length;
@@ -1248,13 +1283,13 @@ class LuaRenderer {
                   for (var i = 0; i < count; i++)
                     LovePageActive(
                       active: parentActive && i == active,
-                      child: build(context, (items[i] as Map)['content']),
+                      child: _tabBody(context, (items[i] as Map)['content']),
                     ),
                 ],
               )
             : LovePageActive(
                 active: parentActive,
-                child: build(context, (items[active] as Map)['content']),
+                child: _tabBody(context, (items[active] as Map)['content']),
               );
 
     return Column(

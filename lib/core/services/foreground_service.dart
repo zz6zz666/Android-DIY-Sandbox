@@ -12,9 +12,9 @@ class ForegroundServiceManager {
   static void init() {
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'astrbot_keep_alive_channel',
-        channelName: 'AstrBot后台服务',
-        channelDescription: '保持AstrBot在后台运行',
+        channelId: 'sandbox_keep_alive_channel',
+        channelName: 'Sandbox后台服务',
+        channelDescription: '保持 Sandbox 在后台运行',
         channelImportance: NotificationChannelImportance.MIN,
         priority: NotificationPriority.MIN,
         visibility: NotificationVisibility.VISIBILITY_PUBLIC,
@@ -44,7 +44,7 @@ class ForegroundServiceManager {
       Log.i('启动新服务', tag: 'ForegroundService');
       return FlutterForegroundTask.startService(
         serviceId: 1001,
-        notificationTitle: 'AstrBot正在运行',
+        notificationTitle: 'Android DIY Sandbox 正在运行',
         notificationText: '应用正在后台保持运行状态',
         notificationIcon: null,
         notificationButtons: [
@@ -84,7 +84,7 @@ class ForegroundServiceManager {
   }) async {
     if (await FlutterForegroundTask.isRunningService) {
       FlutterForegroundTask.updateService(
-        notificationTitle: title ?? 'AstrBot正在运行',
+        notificationTitle: title ?? 'Android DIY Sandbox 正在运行',
         notificationText: text ?? '应用正在后台保持运行状态',
         notificationButtons: [
           const NotificationButton(

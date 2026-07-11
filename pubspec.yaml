@@ -1,7 +1,7 @@
-name: astrbot_android
-description: AstrBot Android App
+name: android_diy_sandbox
+description: Android DIY Sandbox
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
-version: 0.1.0-bate4+4
+version: 0.2.0+5
 environment:
   sdk: ">=3.10.0 <4.0.0"
 
@@ -70,8 +70,9 @@ flutter:
     - assets/scripts/widgets/
     - assets/scripts/apps/
     - assets/scripts/agent.lua
+    - assets/scripts/agent/
     - assets/scripts/agent/main.lua
-    - assets/scripts/agent/app-reload
+    - assets/scripts/agent/sandbox
     - assets/scripts/main.lua
     - assets/scripts/AGENTS.md
     - assets/scripts/games/demo/main.lua

@@ -13,7 +13,7 @@ if (hasKeystoreFile) {
     logger.lifecycle('Warning: key.properties not found, fallback to debug keystore.')
 }
 android {
-    namespace 'com.astrbot.astrbot_android'
+    namespace 'com.diysandbox.android'
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -37,7 +37,7 @@ android {
     }
 
     defaultConfig {
-        applicationId 'com.astrbot.astrbot_bubble'
+        applicationId 'com.diysandbox.android'
         minSdk = 26
         targetSdk = 35
         versionCode = flutter.versionCode
@@ -60,7 +60,7 @@ android {
         profileTest {
             dimension "distribution"
             applicationIdSuffix ".profile"
-            resValue "string", "app_name", "AstrBot泡泡版"
+            resValue "string", "app_name", "DIY Sandbox"
         }
     }
 
@@ -76,7 +76,7 @@ android {
         }
         debug {
             applicationIdSuffix ".debug"
-            resValue "string", "app_name", "AstrBot泡泡版"
+            resValue "string", "app_name", "DIY Sandbox"
             signingConfig hasKeystoreFile ? signingConfigs.release : signingConfigs.debug
             minifyEnabled false
             shrinkResources false

@@ -1,4 +1,4 @@
-package com.astrbot.astrbot_android;
+package com.diysandbox.android;
 
 import android.app.Activity;
 import android.app.NotificationChannel;
@@ -67,12 +67,12 @@ public class MainActivity extends FragmentActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         mContext = this;
-        setContentView(com.astrbot.astrbot_android.R.layout.my_activity_layout);
+        setContentView(com.diysandbox.android.R.layout.my_activity_layout);
 
         flutterFragment = (FlutterFragment) fragmentManager.findFragmentByTag(TAG_FLUTTER_FRAGMENT);
         FlutterEngine flutterEngine = new FlutterEngine(this, null, false);
         flutterEngine.getDartExecutor().executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault());
-        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), "astrbot_channel").setMethodCallHandler((call, result) -> {
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), "sandbox_channel").setMethodCallHandler((call, result) -> {
             if ("lib_path".equals(call.method)) {
                 result.success(mContext.getApplicationContext().getApplicationInfo().nativeLibraryDir);
             } else {
@@ -118,7 +118,7 @@ public class MainActivity extends FragmentActivity {
         }
         fragmentManager
                 .beginTransaction()
-                .add(com.astrbot.astrbot_android.R.id.fl_container, flutterFragment, TAG_FLUTTER_FRAGMENT)
+                .add(com.diysandbox.android.R.id.fl_container, flutterFragment, TAG_FLUTTER_FRAGMENT)
                 .commit();
     }
 
@@ -131,7 +131,7 @@ public class MainActivity extends FragmentActivity {
 
     private void postNotification(int id, String title, String body, String channelId,
                                   boolean ongoing) {
-        if (channelId == null || channelId.isEmpty()) channelId = "astrbot_lua_notify";
+        if (channelId == null || channelId.isEmpty()) channelId = "sandbox_lua_notify";
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm =
                     (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);

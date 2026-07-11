@@ -1,4 +1,4 @@
-package com.astrbot.astrbot_android
+package com.diysandbox.android
 
 import android.app.Application
 

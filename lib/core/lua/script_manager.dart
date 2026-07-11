@@ -33,7 +33,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '88';
+  static const String _defaultScriptsVersion = '0.2.7';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -72,9 +72,13 @@ class ScriptManager {
   bool _extStorageGranted = false;
   bool _extReqInFlight = false;
 
-  // Agent 控制通道: 本机回环 TCP, 供容器内 agent 用 app-reload 工具被动触发脚本重载。
+  // Agent 控制通道: 本机回环 TCP, 供容器内 agent 用 sandbox 工具被动触发脚本重载/隔离运行。
   ServerSocket? _agentCtrl;
   String _agentToken = '';
+
+  // 本地 WebSocket 回声服务器 (127.0.0.1): 让 WS 演示零外网依赖即可自测。
+  HttpServer? _wsEcho;
+  int? _wsEchoPort;
 
   bool get initialized => _initialized;
   List<Map<String, dynamic>> get navTabs => _navTabs;
@@ -96,8 +100,10 @@ class ScriptManager {
     }
     _registerHandlers();
     await _releaseDefaultScripts();
+    LuaLog.instance.attachFile('$scriptsDir/agent/lua.log');
     unawaited(_refreshExtStoragePerm());
     unawaited(_startAgentControl());
+    unawaited(_startWsEcho());
     try {
       _engine.doString(kLuaPrelude, chunkName: 'prelude');
       _loadUserScripts();
@@ -184,7 +190,7 @@ class ScriptManager {
 
   /// 快照保护式热重载: 重载成功后弹出 15s 倒计时对话框, 允许保留或回退。
   /// 重载中途 Lua 语法错误 → 自动回退快照。
-  /// [silent] 为 true 时不弹倒计时确认框, 直接应用 (供 agent app-reload 使用):
+  /// [silent] 为 true 时不弹倒计时确认框, 直接应用 (供 agent sandbox reload 使用):
   /// 仍保留快照/失败自动回退, 只是成功时不打断用户 (agent 入口受保护, 界面改坏可再改)。
   Future<void> reloadWithGuard({bool silent = false}) async {
     final ctx = Get.context;
@@ -245,8 +251,31 @@ class ScriptManager {
 
   // ==================== Agent 控制通道 (回环 TCP, 被动触发重载) ====================
 
+  /// 启动本地 WebSocket 回声服务器 (幂等)。收到任意消息原样回传, 供 WS 演示零外网自测。
+  Future<void> _startWsEcho() async {
+    if (_wsEcho != null) return;
+    try {
+      _wsEcho = await HttpServer.bind(InternetAddress.loopbackIPv4, 0, shared: true);
+      _wsEchoPort = _wsEcho!.port;
+      _wsEcho!.listen((req) async {
+        if (WebSocketTransformer.isUpgradeRequest(req)) {
+          try {
+            final ws = await WebSocketTransformer.upgrade(req);
+            ws.add('已连接到本地回声服务器 · 发送任意内容将原样返回');
+            ws.listen((data) => ws.add(data), onError: (_) {}, cancelOnError: false);
+          } catch (_) {}
+        } else {
+          req.response.statusCode = HttpStatus.upgradeRequired;
+          await req.response.close();
+        }
+      });
+    } catch (e) {
+      debugPrint('[ScriptManager] 本地 WS 回声启动失败: $e');
+    }
+  }
+
   /// 启动本机回环控制通道; 幂等 (跨 reload 只绑定一次)。
-  /// 端口/令牌写入 <scriptsDir>/agent/.control, 供容器内 app-reload 工具读取。
+  /// 端口/令牌写入 <scriptsDir>/agent/.control, 供容器内 sandbox 工具读取。
   Future<void> _startAgentControl() async {
     if (_agentCtrl != null) return;
     try {
@@ -278,6 +307,104 @@ class ScriptManager {
     }, onError: (_) {});
   }
 
+  /// 在隔离的 Lua 引擎中执行一个脚本文件 (供 agent 快速调试)。
+  /// 独立 lua_State: 不污染在运行的 UI (页面/导航/love 进程均不受影响);
+  /// 仅挂少量安全只读 + 工具箱 handler, UI/注册/异步类调用视作 no-op。
+  /// 捕获 print / host.log|warn|error / toast 输出与加载/运行错误, 汇总返回。
+  Future<String> runIsolated(String path) async {
+    final f = File(path.startsWith('/') ? path : '$scriptsDir/$path');
+    if (!f.existsSync()) return '✗ 文件不存在: ${f.path}\n';
+    String code;
+    try {
+      code = f.readAsStringSync();
+    } catch (e) {
+      return '✗ 读取失败: $e\n';
+    }
+    final out = StringBuffer();
+    final eng = LuaEngine();
+    eng.open();
+    eng.silentUnknown = true; // 其余 UI/注册/异步调用静默 no-op
+
+    void cap(String tag, List<Object?> a) =>
+        out.writeln('[$tag] ${a.isNotEmpty ? a[0] : ''}');
+    eng.registerHandler('toast', (a) { cap('toast', a); return null; });
+    eng.registerHandler('log', (a) { cap('log', a); return null; });
+    eng.registerHandler('warn', (a) { cap('warn', a); return null; });
+    eng.registerHandler('logerror', (a) { cap('error', a); return null; });
+
+    // 安全只读路径 / 文件
+    eng.registerHandler('home_path', (_) => RuntimeEnvir.homePath);
+    eng.registerHandler('tmp_path', (_) => RuntimeEnvir.tmpPath);
+    eng.registerHandler('bin_path', (_) => RuntimeEnvir.binPath);
+    eng.registerHandler('ubuntu_path', (_) => ubuntuPath);
+    eng.registerHandler('storage_path', (_) => '/storage/emulated/0');
+    eng.registerHandler('backup_dir', (_) => '${RuntimeEnvir.configPath}/backups');
+    eng.registerHandler('get_setting', (a) =>
+        a.isEmpty ? null : a[0].toString().setting.get());
+    eng.registerHandler('read_file', (a) {
+      if (a.isEmpty) return null;
+      try {
+        final ff = File('${a[0]}');
+        return ff.existsSync() ? ff.readAsStringSync() : null;
+      } catch (_) { return null; }
+    });
+    eng.registerHandler('exists', (a) =>
+        a.isNotEmpty && (File('${a[0]}').existsSync() || Directory('${a[0]}').existsSync()));
+    eng.registerHandler('list_dir', (a) {
+      if (a.isEmpty) return <Object?>[];
+      try {
+        final d = Directory('${a[0]}');
+        if (!d.existsSync()) return <Object?>[];
+        return d.listSync().map((x) => {
+              'name': x.path.split('/').last,
+              'path': x.path,
+              'isDir': x is Directory,
+            }).toList();
+      } catch (_) { return <Object?>[]; }
+    });
+    // 让 state/reactive 读回默认值, 使脚本逻辑正常跑
+    eng.registerHandler('state_get', (a) => a.length > 1 ? a[1] : null);
+    eng.registerHandler('reactive_get', (a) => a.length > 1 ? a[1] : null);
+    // 工具箱 (编码/哈希/uuid/now_ms/device_info 等纯函数)
+    _registerToolkitHandlers(eng,
+        (a, i) => (a.length > i && a[i] is LuaFunctionRef) ? a[i] as LuaFunctionRef : null);
+    // 覆盖工具箱里的异步/副作用项为 no-op (隔离引擎运行后即关闭)
+    eng.registerHandler('interval', (_) => 0);
+    eng.registerHandler('clear_interval', (_) => null);
+    eng.registerHandler('write_bytes', (_) => false);
+
+    try {
+      eng.doString(kLuaPrelude, chunkName: 'prelude');
+      eng.doString('SCRIPTS = [[$scriptsDir]]', chunkName: 'scripts_dir');
+      eng.doString(
+          "package.path = '$scriptsDir/?.lua;$scriptsDir/?/init.lua;' .. package.path",
+          chunkName: 'package_path');
+      // 把 print 重定向到捕获
+      eng.doString(
+          "function print(...) local t={} for i=1,select('#',...) do t[i]=tostring((select(i,...))) end "
+          "__host_call('log', table.concat(t, '\\t')) end",
+          chunkName: 'print_redirect');
+
+      final r = eng.doString(code, chunkName: path);
+      out.writeln('--- 加载成功 ---');
+      // 若返回模块表且含 build, 调用一次以捕获运行期错误
+      if (r is Map && r['build'] is LuaFunctionRef) {
+        out.writeln('检测到模块 build(), 试运行...');
+        (r['build'] as LuaFunctionRef).call([<String, Object?>{}]);
+        out.writeln('build() 执行完毕');
+      } else if (r != null) {
+        out.writeln('返回值: $r');
+      }
+    } on LuaError catch (e) {
+      out.writeln('✗ ${e.message}');
+    } catch (e) {
+      out.writeln('✗ 异常: $e');
+    } finally {
+      eng.close();
+    }
+    return out.toString();
+  }
+
   void _handleAgentCommand(String line, Socket sock) {
     final parts = line.split(RegExp(r'\s+'));
     final cmd = parts.isNotEmpty ? parts[0] : '';
@@ -301,6 +428,17 @@ class ScriptManager {
         break;
       case 'ping':
         reply('OK pong\n');
+        break;
+      case 'run':
+        // run <token> <path>: 在隔离引擎里跑一个 .lua 文件, 回传输出 (供快速调试)
+        final path = parts.length > 2 ? parts.sublist(2).join(' ') : '';
+        if (path.isEmpty) {
+          reply('ERR run 需要文件路径 (相对脚本根或绝对路径)\n');
+          break;
+        }
+        LuaLog.instance.info('[agent] 隔离运行: $path');
+        runIsolated(path).then((r) => reply('OK\n$r'))
+            .catchError((e) => reply('ERR $e\n'));
         break;
       default:
         reply('ERR unknown command: $cmd\n');
@@ -661,15 +799,26 @@ class ScriptManager {
       if (a.isEmpty) return null;
       final p = '${a[0]}';
       if (!_ensureExternalAccess(p)) return null;
-      final f = File(p);
-      return f.existsSync() ? f.readAsStringSync() : null;
+      try {
+        final f = File(p);
+        return f.existsSync() ? f.readAsStringSync() : null;
+      } catch (_) {
+        return null;
+      }
     });
     e.registerHandler('write_file', (a) {
       if (a.length < 2) return false;
       final p = '${a[0]}';
       if (!_ensureExternalAccess(p)) return false;
-      File(p).writeAsStringSync('${a[1]}');
-      return true;
+      try {
+        final f = File(p);
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync('${a[1]}');
+        return true;
+      } catch (e) {
+        LuaLog.instance.error('write_file 失败: $p ($e)');
+        return false;
+      }
     });
     e.registerHandler('exists', (a) {
       if (a.isEmpty) return false;
@@ -694,7 +843,7 @@ class ScriptManager {
       return true;
     });
 
-    // 容器 / AstrBot 控制
+    // 容器控制
     e.registerHandler('container', (a) {
       if (a.isEmpty) return null;
       final cmd = '${a[0]}';
@@ -802,7 +951,7 @@ class ScriptManager {
     e.registerHandler('bin_path', (_) => RuntimeEnvir.binPath);
     e.registerHandler('tmp_path', (_) => RuntimeEnvir.tmpPath);
     e.registerHandler('backup_dir',
-        (_) => '/storage/emulated/0/Download/AstrBotBubble');
+        (_) => '/storage/emulated/0/Download/AndroidDIYSandbox');
     e.registerHandler('mkdirs', (a) {
       if (a.isNotEmpty) {
         final p = '${a[0]}';
@@ -841,6 +990,7 @@ class ScriptManager {
         stateRevision.value++;
         cb?.call();
       });
+      _focusTerminalTab(hc); // spawn 一定输出到终端 → 自动切到终端页 (不依赖脚本硬编码索引)
       return null;
     });
     // 原语: 停止 key 对应的 spawn (关闭其终端 tab)
@@ -852,7 +1002,7 @@ class ScriptManager {
       return null;
     });
     // 原语: 在 [start,end] 范围内找一个可绑定的空闲端口 (跳过 exclude 列表)
-    // 通用能力, 无任何 AstrBot/NapCat 语义; cb(port|nil)
+    // 通用能力, 无特定业务语义; cb(port|nil)
     e.registerHandler('request_reload', (_) {
       // 延迟到当前 Lua 调用返回后再重载, 避免在回调中关闭 lua_State
       Future.delayed(const Duration(milliseconds: 50), reloadWithGuard);
@@ -1009,6 +1159,11 @@ class ScriptManager {
       final id = a.isNotEmpty ? (a[0] as num?)?.toInt() : null;
       if (id != null) _httpCancels.remove(id)?.cancel('cancelled');
       return null;
+    });
+
+    // 本地 WS 回声服务器地址 (ws://127.0.0.1:port), 未就绪返回 nil。
+    e.registerHandler('ws_echo_url', (_) {
+      return _wsEchoPort == null ? null : 'ws://127.0.0.1:$_wsEchoPort';
     });
 
     // 通用 WebSocket 原语: { url, headers, on_open=fn, on_message=fn(data,binary),
@@ -1170,6 +1325,7 @@ class ScriptManager {
       if (fmt == 'raw' || fmt == 'bytes') return bytes;
       return hex.encode(bytes);
     });
+    e.registerHandler('now_ms', (_) => DateTime.now().millisecondsSinceEpoch);
     e.registerHandler('uuid', (_) {
       final b = List<int>.generate(16, (_) => rnd.nextInt(256));
       b[6] = (b[6] & 0x0f) | 0x40; // version 4
@@ -1495,6 +1651,13 @@ class ScriptManager {
     }
   }
 
+  /// 切到脚本里第一个「终端」类型的导航页 (供 spawn 自动聚焦, 不依赖硬编码索引)。
+  void _focusTerminalTab(HomeController hc) {
+    final idx = _navTabs.indexWhere(
+        (t) => t['page'] is Map && '${(t['page'] as Map)['type']}' == 'terminal');
+    if (idx >= 0) hc.pendingMainTabIndex.value = idx;
+  }
+
   void _toast(String msg) {
     if (Get.context == null) {
       debugPrint('[Lua toast] $msg');
@@ -1593,6 +1756,7 @@ class ScriptManager {
     );
     cb?.call([ok ?? false]);
     cb?.dispose();
+    stateRevision.value++; // 对话框回调里可能改了 state/DB, 触发整页重建刷新
   }
 
   Future<void> _input(Map opts, LuaFunctionRef? cb) async {
@@ -1623,6 +1787,7 @@ class ScriptManager {
     Future.delayed(const Duration(seconds: 1), controller.dispose);
     cb?.call([result]);
     cb?.dispose();
+    stateRevision.value++; // 输入回调里可能改了 state/DB, 触发整页重建刷新
   }
 }
 

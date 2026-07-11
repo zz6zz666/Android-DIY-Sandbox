@@ -97,6 +97,9 @@ function host.websocket(spec)
   return ws
 end
 
+-- 本地 WebSocket 回声服务器地址 (ws://127.0.0.1:port); App 内置, 零外网依赖, 用于自测 WS。
+function host.ws_echo_url() return __host_call("ws_echo_url") end
+
 -- ==================== DIY 工具箱: 编码/加密/定时/二进制/设备 ====================
 -- 编码 (data 可为字符串或字节数组[0-255]; decode 默认返回文本, 传 true 返回字节数组)
 function host.base64_encode(data) return __host_call("base64_encode", data) end
@@ -122,6 +125,7 @@ function host.hmac_sha1(key, data, b64)   return __host_call("hmac", "sha1", key
 -- 随机: random_bytes(n, fmt) fmt="hex"(默认)|"b64"|"raw"(字节数组); uuid() -> v4
 function host.random_bytes(n, fmt) return __host_call("random_bytes", n, fmt) end
 function host.uuid() return __host_call("uuid") end
+function host.now_ms() return __host_call("now_ms") end
 
 -- 二进制文件 IO (与 base64 互转; 用于存取 AI 返回的图片/音频等)
 function host.write_bytes(path, b64) return __host_call("write_bytes", path, b64) end
@@ -207,6 +211,8 @@ function tooltip(child, msg) return comp("tooltip", { child=child, message=msg }
 -- text(s, { size=, weight=, color=, align=, maxLines=, ellipsis=, bind= })
 -- bind = "reactiveKey" 时文本内容跟随 reactive(key) 实时刷新 (流式输出), 只重绘本组件。
 function text(s, o)   o=o or {}; o.text=s; return comp("text", o) end
+-- markdown(s, o): 渲染 Markdown 文本 (标题/列表/代码块/加粗/链接等)
+function markdown(s, o) o=o or {}; o.text=s; return comp("markdown", o) end
 -- richtext({ {text=, color=, weight=, size=, italic=, underline=}, ... }, o)
 function richtext(spans, o) o=o or {}; o.spans=spans; return comp("richtext", o) end
 function icon(name, o) o=o or {}; o.icon=name; return comp("icon", o) end

@@ -65,14 +65,13 @@ function M.install(reinstall)
   local pre = table.concat({
     'export TMPDIR="' .. host.tmp_path() .. '"',
     'export OPENCODE_VERSION="' .. OPENCODE_VERSION .. '"',
-    'export OPENCODE_GH_PROXY="' .. (host.get("environment_github_proxy") or "auto") .. '"',
+    'export OPENCODE_GH_PROXY="' .. (host.get("environment_github_proxy") or "direct") .. '"',
   }, "\n")
   local body = "\ninstall_opencode\n"
   if reinstall then
     body = '\nrm -f "$HOME/.local/bin/opencode"\ninstall_opencode\n'
   end
   host.spawn(pre .. "\n" .. SH_OPENCODE .. body, "opencode 安装", "opencode_install")
-  host.nav.go(2)
 end
 
 -- ==================== 运行 / 启动 ====================
@@ -133,9 +132,9 @@ end
 -- tab_name: WebView 标签页名称, 默认 "opencode"
 function M.launch(target_dir, tab_name)
   if not M.installed() then
-    host.confirm("尚未安装 opencode 引擎，是否前往「环境管理」安装？", function(yes)
+    host.confirm("opencode 引擎尚未安装。是否前往「环境管理」查看安装步骤?", function(yes)
       if yes then host.nav.go(0) end
-    end)
+    end, { title = "未安装 opencode", ok_text = "前往安装", cancel_text = "取消" })
     return
   end
   if S.running and S.port then open_webui(target_dir, tab_name); return end

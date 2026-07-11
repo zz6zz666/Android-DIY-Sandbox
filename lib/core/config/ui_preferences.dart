@@ -19,7 +19,7 @@ class UiPreferences {
   static double get statusOverlayOpacity =>
       _readOpacity(_statusOverlayOpacity, 0.38);
   static double get terminalOverlayOpacity =>
-      _readOpacity(_terminalOverlayOpacity, 0.55);
+      _readOpacity(_terminalOverlayOpacity, 0.65);
 
   static void saveHomeBackgroundPath(String path) {
     _homeBackgroundPath.set(path);

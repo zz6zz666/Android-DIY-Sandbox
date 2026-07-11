@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Sandbox Agent 开发工具集 — 通过本机回环控制通道与宿主 App 通信。
+#
+# 用法 (在容器命令行, 脚本目录通常挂载为 /app-lua-runtime):
+#   bash agent/sandbox reload            重载全部 Lua 脚本 (等同主页刷新键, 带快照保护)
+#   bash agent/sandbox ping              探活 (确认 App 在运行)
+#   bash agent/sandbox run <file.lua>    在隔离引擎里试跑一个脚本 (语法/逻辑快速调试, 不影响在跑的 UI)
+#   bash agent/sandbox log [N]           查看最近 N 行 Lua 运行日志 (默认 100)
+#   bash agent/sandbox log -f [N]        持续跟随 Lua 运行日志
+#
+# 说明:
+#   - reload / run 走本机回环 127.0.0.1 控制通道 (端口/令牌写在本目录 .control, 由 App 启动时生成)。
+#   - run 在独立 lua_State 里执行, 只挂少量安全只读+工具箱接口, UI/注册/异步类调用视作 no-op;
+#     捕获 print / host.log|warn|error / toast 与加载/运行错误后回传, 适合快速自测脚本能否正常加载。
+#   - log 直接读本目录的 lua.log (host.log/print/加载运行错误的文件镜像)。
+set -euo pipefail
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+CTRL="$DIR/.control"
+LOG="$DIR/lua.log"
+
+read_ctrl() {
+  if [ ! -f "$CTRL" ]; then
+    echo "控制通道未就绪: 找不到 $CTRL" >&2
+    echo "请确认宿主 App 正在运行, 且脚本释放目录已正确挂载。" >&2
+    exit 1
+  fi
+  PORT="$(sed -n '1p' "$CTRL" | tr -d '[:space:]')"
+  TOKEN="$(sed -n '2p' "$CTRL" | tr -d '[:space:]')"
+  if [ -z "$PORT" ] || [ -z "$TOKEN" ]; then
+    echo "控制文件内容无效: $CTRL" >&2
+    exit 1
+  fi
+}
+
+open_conn() {
+  read_ctrl
+  if ! exec 3<>"/dev/tcp/127.0.0.1/$PORT"; then
+    echo "无法连接宿主 127.0.0.1:$PORT (App 未运行?)" >&2
+    exit 1
+  fi
+}
+
+usage() { sed -n 's/^# \{0,1\}//p' "$0" | sed '/^!/d'; }
+
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+  reload|ping)
+    open_conn
+    printf '%s %s\n' "$CMD" "$TOKEN" >&3
+    RESP="$(head -n1 <&3 || true)"
+    exec 3<&- 3>&-
+    echo "宿主响应: ${RESP:-<无>}"
+    case "$RESP" in OK*) exit 0 ;; *) exit 2 ;; esac
+    ;;
+
+  run)
+    [ $# -ge 1 ] || { echo "用法: bash agent/sandbox run <file.lua>" >&2; exit 1; }
+    # 把路径规整为相对脚本根 (去掉容器挂载点 /app-lua-runtime/ 前缀)
+    ABS="$(readlink -f "$1" 2>/dev/null || echo "$1")"
+    REL="$1"
+    case "$ABS" in
+      /app-lua-runtime/*) REL="${ABS#/app-lua-runtime/}" ;;
+    esac
+    open_conn
+    printf 'run %s %s\n' "$TOKEN" "$REL" >&3
+    cat <&3
+    exec 3<&- 3>&-
+    ;;
+
+  log)
+    [ -f "$LOG" ] || { echo "暂无日志: $LOG (脚本尚未产生日志?)" >&2; exit 1; }
+    if [ "${1:-}" = "-f" ] || [ "${1:-}" = "--follow" ]; then
+      exec tail -n "${2:-50}" -f "$LOG"
+    fi
+    exec tail -n "${1:-100}" "$LOG"
+    ;;
+
+  help|-h|--help|"")
+    usage
+    ;;
+
+  *)
+    echo "未知子命令: $CMD" >&2
+    echo "运行 'bash agent/sandbox help' 查看用法。" >&2
+    exit 1
+    ;;
+esac

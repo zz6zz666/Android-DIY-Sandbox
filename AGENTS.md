@@ -12,7 +12,7 @@ flutter build apk --debug --flavor normal --target-platform android-arm64 --no-t
 (见 `lib/ui/lua/lua_view.dart` 的 `luaIconFor` 与 `lib/ui/lua/material_icons_map.g.dart`)。
 不加该 flag 时 Flutter 会摇树裁掉未静态引用的图标,导致 Lua 指定的图标显示为方框。
 
-真机:XT2507-5,包名 `com.astrbot.astrbot_bubble.debug`。
+真机:XT2507-5,包名 `com.diysandbox.android.debug`。
 
 ## Lua UI 图标映射
 

@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.astrbot.astrbot_android">
+    package="com.diysandbox.android">
 
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -62,7 +62,7 @@
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />
         <meta-data
-            android:name="com.astrbot.astrbot_android.ic_launcher"
+            android:name="com.diysandbox.android.ic_launcher"
             android:resource="@mipmap/ic_launcher" />
         
         <!-- Flutter Foreground Service -->
@@ -84,9 +84,9 @@
         </provider>
 
         <!-- LÖVE multi-instance: each love canvas runs in its own process -->
-        <service android:name="com.astrbot.astrbot_android.LoveService0" android:process=":love0" android:exported="false" android:stopWithTask="false" />
-        <service android:name="com.astrbot.astrbot_android.LoveService1" android:process=":love1" android:exported="false" android:stopWithTask="false" />
-        <service android:name="com.astrbot.astrbot_android.LoveService2" android:process=":love2" android:exported="false" android:stopWithTask="false" />
-        <service android:name="com.astrbot.astrbot_android.LoveService3" android:process=":love3" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.diysandbox.android.LoveService0" android:process=":love0" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.diysandbox.android.LoveService1" android:process=":love1" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.diysandbox.android.LoveService2" android:process=":love2" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.diysandbox.android.LoveService3" android:process=":love3" android:exported="false" android:stopWithTask="false" />
     </application>
 </manifest>

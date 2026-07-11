@@ -8,7 +8,6 @@ import '../../core/utils/file_utils.dart';
 
 /// 终端标签页类型
 enum TerminalTabType {
-  fixed, // 固定的AstrBot终端（只读、颜色过滤、不可关闭）
   system, // 系统终端（可交互、可关闭）
 }
 
@@ -60,26 +59,6 @@ class TerminalTabManager extends GetxController {
 
   // 当前激活的标签页索引
   final RxInt activeTabIndex = 0.obs;
-
-  /// 初始化固定的AstrBot终端标签页
-  void initializeFixedTab(Terminal terminal) {
-    // 清空现有标签页
-    tabs.clear();
-
-    // 添加固定的AstrBot终端标签页
-    final fixedTab = TerminalTab(
-      id: 'fixed_astrbot',
-      title: 'main',
-      type: TerminalTabType.fixed,
-      terminal: terminal,
-      controller: TerminalController(),
-      pty: null, // 固定终端使用外部管理的 pseudoTerminal
-      isActive: true,
-    );
-
-    tabs.add(fixedTab);
-    activeTabIndex.value = 0;
-  }
 
   /// 添加新的系统终端标签页
   Future<void> addSystemTerminalTab() async {
@@ -265,12 +244,6 @@ class TerminalTabManager extends GetxController {
     }
 
     final tab = tabs[index];
-
-    // 固定标签页不能关闭
-    if (tab.type == TerminalTabType.fixed) {
-      Get.snackbar('提示', 'AstrBot终端不能关闭');
-      return;
-    }
 
     try {
       // 关闭PTY

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 /// 日志级别。
@@ -38,20 +39,50 @@ class LuaLog {
   static const int _cap = 2000;
   final List<LuaLogEntry> _entries = [];
 
+  /// 文件镜像 (供容器内 opencode `tail` 查看; 路径通常在 scriptsDir/agent/lua.log,
+  /// 该目录挂载到容器 /app-lua-runtime)。
+  File? _sink;
+
+  /// 绑定日志文件并清空 (每次 App 启动/重载重新开始, 避免无限增长)。
+  void attachFile(String path) {
+    try {
+      final f = File(path);
+      f.parent.createSync(recursive: true);
+      f.writeAsStringSync(
+        '# Lua 运行日志 (host.log/warn/error + print + 加载/运行错误)\n'
+        '# 容器内查看: tail -n 200 -f /app-lua-runtime/agent/lua.log\n',
+      );
+      _sink = f;
+    } catch (_) {
+      _sink = null;
+    }
+  }
+
+  void _writeSink(LuaLogEntry e) {
+    final s = _sink;
+    if (s == null) return;
+    try {
+      s.writeAsStringSync('${e.timeText} [${e.levelText}] ${e.message}\n',
+          mode: FileMode.append, flush: false);
+    } catch (_) {}
+  }
+
   /// 每次有新日志自增, 供 UI 建立响应式依赖。
   final ValueNotifier<int> revision = ValueNotifier<int>(0);
 
   List<LuaLogEntry> get entries => _entries;
 
   void add(LuaLogLevel level, Object? message) {
-    _entries.add(LuaLogEntry(level, '${message ?? ''}'));
+    final entry = LuaLogEntry(level, '${message ?? ''}');
+    _entries.add(entry);
     if (_entries.length > _cap) {
       _entries.removeRange(0, _entries.length - _cap);
     }
+    _writeSink(entry);
     revision.value++;
     // 同时回显到 logcat, 方便有线调试。
     if (kDebugMode) {
-      debugPrint('[Lua/${_entries.last.levelText}] ${_entries.last.message}');
+      debugPrint('[Lua/${entry.levelText}] ${entry.message}');
     }
   }
 

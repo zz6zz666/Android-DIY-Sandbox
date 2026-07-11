@@ -1,4 +1,4 @@
-package com.astrbot.astrbot_android;
+package com.diysandbox.android;
 
 import android.database.Cursor;
 import android.database.MatrixCursor;
@@ -18,7 +18,7 @@ import java.util.LinkedList;
 
 /**
  * Ubuntu 文件系统 DocumentsProvider
- * 将 AstrBot Ubuntu 环境暴露到系统文件管理器
+ * 将 Sandbox Ubuntu 环境暴露到系统文件管理器
  */
 public class UbuntuDocumentsProvider extends DocumentsProvider {
     private static final String TAG = "UbuntuDocsProvider";
@@ -62,11 +62,11 @@ public class UbuntuDocumentsProvider extends DocumentsProvider {
         final MatrixCursor.RowBuilder row = result.newRow();
         row.add(DocumentsContract.Root.COLUMN_ROOT_ID, ROOT_ID);
         row.add(DocumentsContract.Root.COLUMN_DOCUMENT_ID, getDocIdForFile(ubuntuPath));
-        row.add(DocumentsContract.Root.COLUMN_SUMMARY, "AstrBot Ubuntu 环境");
+        row.add(DocumentsContract.Root.COLUMN_SUMMARY, "Sandbox Ubuntu 环境");
         row.add(DocumentsContract.Root.COLUMN_FLAGS,
                 DocumentsContract.Root.FLAG_SUPPORTS_CREATE |
                 DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD);
-        row.add(DocumentsContract.Root.COLUMN_TITLE, "AstrBot Ubuntu");
+        row.add(DocumentsContract.Root.COLUMN_TITLE, "Sandbox Ubuntu");
         row.add(DocumentsContract.Root.COLUMN_MIME_TYPES, "*/*");
         row.add(DocumentsContract.Root.COLUMN_AVAILABLE_BYTES, ubuntuPath.getFreeSpace());
         row.add(DocumentsContract.Root.COLUMN_ICON, R.mipmap.ic_launcher);

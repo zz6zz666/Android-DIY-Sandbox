@@ -2,7 +2,7 @@ import 'package:get/get.dart';
 
 import 'app_web_controller.dart';
 
-/// 一个 WebUI 标签页 (通用, 无任何 AstrBot/NapCat 语义)。
+/// 一个 WebUI 标签页 (通用, 无特定业务语义)。
 class WebViewTab {
   final String id;
   String title;
