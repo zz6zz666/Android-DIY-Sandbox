@@ -979,7 +979,7 @@ local function quick_start_card(ctx)
     row({
       expanded(button(running and "停止" or "启动 AstrBot", function()
         astrbot_toggle(running)
-      end, { icon = running and "stop" or "play" })),
+      end, { icon = running and "stop" or "play_arrow" })),
       expanded(button("打开 WebUI", function()
         host.webview_open("http://127.0.0.1:" .. dash .. "/", "AstrBot")
       end, { variant = "tonal", icon = "language" })),
@@ -1088,7 +1088,7 @@ local function napcat_tile(ins)
     subtitle = "QQ " .. (logged and ins.qq or "未登录，启动后扫码") .. "\nWebUI " .. tostring(ins.webUiPort),
     trailing = row({
       iconbutton("language", function() host.webview_open(NC.webui_url(ins), ins.name) end, { tooltip = "打开 WebUI" }),
-      iconbutton(running and "stop" or "play", function()
+      iconbutton(running and "stop" or "play_arrow", function()
         if running then NC.stop(ins.id) else NC.start(ins.id) end
       end, { tooltip = running and "停止" or "启动" }),
       menu("more", {

@@ -22,7 +22,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '28';
+  static const String _defaultScriptsVersion = '29';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
