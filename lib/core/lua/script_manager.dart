@@ -31,7 +31,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '61';
+  static const String _defaultScriptsVersion = '64';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -58,8 +58,9 @@ class ScriptManager {
   final Map<int, Timer> _intervals = {};
 
   // 系统通知: 原生通道 + 自增 id (未指定 id 时使用)。
+  // 基址取高位, 避开前台保活服务通知 id(1001)等固定 id, 防止互相覆盖。
   static const MethodChannel _notifyChannel = MethodChannel('astr_notify');
-  int _notifySeq = 1000;
+  int _notifySeq = 100000;
 
   bool get initialized => _initialized;
   List<Map<String, dynamic>> get navTabs => _navTabs;
