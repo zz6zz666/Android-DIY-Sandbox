@@ -31,7 +31,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '55';
+  static const String _defaultScriptsVersion = '58';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -44,6 +44,12 @@ class ScriptManager {
   /// 反应式状态: Lua 页面通过 state(key,default) 读写; 变化时递增触发所有 LuaPage 重建。
   final RxInt stateRevision = 0.obs;
   final Map<String, dynamic> _luaState = {};
+
+  /// 按 key 的细粒度响应式值: set 只重绘绑定了该 key 的单个组件 (如流式文本),
+  /// 不触发 stateRevision / 整页重建。用于高频更新 (AI 逐字输出、进度等)。
+  final Map<String, ValueNotifier<Object?>> _reactives = {};
+  ValueNotifier<Object?> reactiveNotifier(String key, [Object? initial]) =>
+      _reactives.putIfAbsent(key, () => ValueNotifier<Object?>(initial));
 
   // 通用网络原语状态: 自增句柄 + 在途 HTTP 取消令牌 + 存活的 WebSocket 连接。
   int _netSeq = 0;
@@ -79,6 +85,7 @@ class ScriptManager {
     _pages.clear();
     _navTabs = [];
     _homeActions = [];
+    _reactives.clear();
     _initialized = false;
     // 重新开一个干净的 lua_State, 避免残留全局
     _engine.close();
@@ -453,6 +460,22 @@ class ScriptManager {
       if (a.isEmpty) return null;
       _luaState['${a[0]}'] = a.length > 1 ? a[1] : null;
       stateRevision.value++;
+      return null;
+    });
+    // 细粒度响应式值 (流式更新): set 不触发整页重建, 仅重绘绑定组件。
+    e.registerHandler('reactive_init', (a) {
+      if (a.isEmpty) return null;
+      reactiveNotifier('${a[0]}', a.length > 1 ? a[1] : null);
+      return null;
+    });
+    e.registerHandler('reactive_get', (a) {
+      if (a.isEmpty) return null;
+      final n = _reactives['${a[0]}'];
+      return n != null ? n.value : (a.length > 1 ? a[1] : null);
+    });
+    e.registerHandler('reactive_set', (a) {
+      if (a.isEmpty) return null;
+      reactiveNotifier('${a[0]}').value = a.length > 1 ? a[1] : null;
       return null;
     });
 

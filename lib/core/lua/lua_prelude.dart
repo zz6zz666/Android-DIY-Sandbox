@@ -142,6 +142,21 @@ function state(key, default)
   return t
 end
 
+-- 细粒度响应式值 (流式/高频更新, 如 AI 逐字输出、进度百分比):
+--   local r = reactive("chat.reply", "")
+--   r.set(r.get() .. token)      -- 只重绘绑定该 key 的组件, 不重跑整页 Lua
+-- 用 text{ bind = "chat.reply" } 把某个文本组件绑定到该 key, 之后 r.set 只刷新那一个 Text。
+-- 与 state 的区别: state.set 触发整页重建 (适合布局变化); reactive.set 只更新绑定点
+-- (适合每秒几十次的内容刷新, 避免整页重建卡顿)。
+function reactive(key, initial)
+  __host_call("reactive_init", key, initial)
+  local t = {}
+  t.key = key
+  t.get = function() return __host_call("reactive_get", key, initial) end
+  t.set = function(v) __host_call("reactive_set", key, v) end
+  return t
+end
+
 -- ==================== 组件构造 (纯 Lua, 返回带 __type 的描述表) ====================
 local function comp(kind, props) props = props or {}; props.__type = kind; return props end
 
@@ -166,6 +181,9 @@ function intrinsicHeight(child) return comp("intrinsic_height", { child=child })
 function intrinsicWidth(child)  return comp("intrinsic_width", { child=child }) end
 function clip(child, o)      o=o or {}; o.child=child; return comp("clip", o) end
 function grid(children, o)   o=o or {}; o.children=children; return comp("grid", o) end
+-- list(children, { scroll=true, axis="horizontal"?, separator=n?, padding=? })
+-- scroll=true 时启用虚拟化: 仅构建可视项, 千/万项长列表 (聊天记录/信息流) 也流畅。
+-- 每项可带 key 字段 (唯一标识) 以帮助插入/删除时正确复用与保留滚动位置。
 function list(children, o)   o=o or {}; o.children=children; return comp("list", o) end
 function datatable(o)        return comp("table", o or {}) end
 -- 手势/点击区域: gesture(child, { onTap=, onLongPress=, onDoubleTap=, ink=true, radius= })
@@ -174,6 +192,8 @@ function inkwell(child, o)   o=o or {}; o.child=child; return comp("inkwell", o)
 function tooltip(child, msg) return comp("tooltip", { child=child, message=msg }) end
 
 -- 内容
+-- text(s, { size=, weight=, color=, align=, maxLines=, ellipsis=, bind= })
+-- bind = "reactiveKey" 时文本内容跟随 reactive(key) 实时刷新 (流式输出), 只重绘本组件。
 function text(s, o)   o=o or {}; o.text=s; return comp("text", o) end
 -- richtext({ {text=, color=, weight=, size=, italic=, underline=}, ... }, o)
 function richtext(spans, o) o=o or {}; o.spans=spans; return comp("richtext", o) end

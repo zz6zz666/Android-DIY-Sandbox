@@ -436,6 +436,17 @@ class _LuaPageState extends State<LuaPage> {
           ('${desc['__type']}' == 'tabs' || desc['fill'] == true)) {
         return renderer.build(context, desc);
       }
+      // 页面顶层惰性化: 顶层区块用 ListView.builder 按需构建, 首屏外的区块滚到才建。
+      if (desc is List) {
+        return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          itemCount: desc.length,
+          itemBuilder: (ctx, i) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: renderer.build(ctx, desc[i]),
+          ),
+        );
+      }
       return ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [renderer.buildRoot(context, desc)],
@@ -860,38 +871,46 @@ class LuaRenderer {
   }
 
   Widget _grid(BuildContext context, Map node) {
-    final children = _children(context, node['children']);
+    final raw = node['children'];
+    final items = raw is List ? raw : const [];
     final cols = (LuaStyle._num(node['columns']) ?? 2).toInt();
-    return GridView.count(
-      crossAxisCount: cols,
-      shrinkWrap: true,
-      physics: node['scroll'] == true
-          ? null
-          : const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: LuaStyle._d(node['gap']) ?? 8,
-      crossAxisSpacing: LuaStyle._d(node['crossGap'] ?? node['gap']) ?? 8,
-      childAspectRatio: LuaStyle._d(node['ratio']) ?? 1,
+    final scrollable = node['scroll'] == true;
+    return GridView.builder(
+      shrinkWrap: !scrollable,
+      physics: scrollable ? null : const NeverScrollableScrollPhysics(),
       padding: LuaStyle.edge(node['padding']),
-      children: children,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: cols,
+        mainAxisSpacing: LuaStyle._d(node['gap']) ?? 8,
+        crossAxisSpacing: LuaStyle._d(node['crossGap'] ?? node['gap']) ?? 8,
+        childAspectRatio: LuaStyle._d(node['ratio']) ?? 1,
+      ),
+      itemCount: items.length,
+      itemBuilder: (ctx, i) => build(ctx, items[i]),
     );
   }
 
+  // 惰性列表: 仅构建可视项 (scroll=true 时真正虚拟化, 千项列表不再一次性实例化)。
   Widget _list(BuildContext context, Map node) {
-    final children = _children(context, node['children']);
+    final raw = node['children'];
+    final items = raw is List ? raw : const [];
     final horizontal = '${node['axis']}' == 'horizontal';
     final sep = LuaStyle._d(node['separator']);
+    final scrollable = node['scroll'] == true;
     return ListView.separated(
       scrollDirection: horizontal ? Axis.horizontal : Axis.vertical,
-      shrinkWrap: node['shrink'] != false,
-      physics: node['scroll'] == true
-          ? null
-          : const NeverScrollableScrollPhysics(),
+      shrinkWrap: scrollable ? false : (node['shrink'] != false),
+      physics: scrollable ? null : const NeverScrollableScrollPhysics(),
       padding: LuaStyle.edge(node['padding']),
-      itemCount: children.length,
+      itemCount: items.length,
       separatorBuilder: (_, __) => sep == null
           ? const SizedBox.shrink()
           : SizedBox(width: horizontal ? sep : 0, height: horizontal ? 0 : sep),
-      itemBuilder: (_, i) => children[i],
+      itemBuilder: (ctx, i) {
+        final item = items[i];
+        final k = item is Map && item['key'] != null ? item['key'] : i;
+        return KeyedSubtree(key: ValueKey(k), child: build(ctx, item));
+      },
     );
   }
 
@@ -971,9 +990,23 @@ class LuaRenderer {
   }
 
   Widget _text(BuildContext context, Map node) {
+    final bind = node['bind'];
+    if (bind is String) {
+      // 流式/响应式文本: 只重绘这一个 Text, 不触发整页重建。
+      final n = ScriptManager.instance.reactiveNotifier(bind);
+      return ValueListenableBuilder<Object?>(
+        valueListenable: n,
+        builder: (ctx, value, _) =>
+            _plainText(ctx, node, '${value ?? node['text'] ?? ''}'),
+      );
+    }
+    return _plainText(context, node, '${node['text'] ?? ''}');
+  }
+
+  Widget _plainText(BuildContext context, Map node, String data) {
     final base = Theme.of(context).textTheme.bodyMedium;
     return Text(
-      '${node['text'] ?? ''}',
+      data,
       textAlign: node['align'] == 'center'
           ? TextAlign.center
           : node['align'] == 'right'

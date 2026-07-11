@@ -1235,6 +1235,43 @@ local function manage_section()
   }, { icon = "settings_outlined" })
 end
 
+-- 流式文本演示: 逐字追加只重绘绑定的那一个 Text, 不重跑整页 (适合 AI 逐字输出)
+local function stream_demo()
+  reactive("demo.reply", "点右侧按钮看逐字输出 →")
+  local tokens = {
+    "这是","一段","用于","演示","流式","输出","的","文字","：","逐","字","追","加","，",
+    "只","会","重","绘","这","一个","文","本","组","件","，","而","不","会","重","跑","整","页","界","面","。",
+  }
+  return card({
+    row({
+      text("流式文本演示", { weight = "bold", size = 16 }),
+      button("模拟逐字输出", function()
+        local reply = reactive("demo.reply")
+        reply.set("")
+        local i, id = 0, nil
+        id = host.interval(70, function()
+          i = i + 1
+          if i > #tokens then host.clear_interval(id); return end
+          reply.set(reply.get() .. tokens[i])
+        end)
+      end, { variant = "tonal" }),
+    }, { main = "spaceBetween" }),
+    text("", { bind = "demo.reply", color = "grey" }),
+    -- 虚拟化长列表演示: 500 项, 仅构建可视项, 瞬开且流畅
+    text("虚拟化长列表 (500 项)", { weight = "bold", size = 14 }),
+    box({
+      height = 180,
+      child = (function()
+        local items = {}
+        for i = 1, 500 do
+          items[i] = tile("第 " .. i .. " 项", { subtitle = "虚拟化列表, 只渲染可视部分", key = i })
+        end
+        return list(items, { scroll = true })
+      end)(),
+    }),
+  })
+end
+
 app.page("home", function(ctx)
   local score = state("runner.score", 0)
   local status = state("runner.status", "准备就绪")
@@ -1281,6 +1318,8 @@ app.page("home", function(ctx)
         end,
       },
     }),
+    -- 流式文本示例: 逐字追加只重绘这一个 Text, 不重跑整页 (适合 AI 逐字输出)
+    stream_demo(),
   }
 end)
 
