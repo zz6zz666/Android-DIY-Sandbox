@@ -27,6 +27,7 @@ nav.tabs({
   { title = "WebUI", icon = "language", page = webview() },
   { title = "终端",  icon = "terminal", page = terminal() },
   { title = "游戏",  icon = "sports_esports",  page = "game_full" },
+  { title = "动态",  icon = "dashboard_customize_outlined", page = "dynamic_apps" },
 })
 
 -- GitHub 代理选项
@@ -1279,6 +1280,47 @@ local function stream_demo()
   })
 end
 
+-- 动态贴图: 从 widgets/ 动态加载一个组件贴到主页, 可随时切换风格 (loadlua 演示 · 方式一)
+local function dynamic_sticker_card(ctx)
+  local dir = SCRIPTS .. "/widgets"
+  local files = {}
+  for _, e in ipairs(host.list_dir(dir)) do
+    if not e.isDir and e.name:match("%.lua$") then
+      files[#files + 1] = { name = e.name:gsub("%.lua$", ""), path = e.path }
+    end
+  end
+  table.sort(files, function(a, b) return a.name < b.name end)
+
+  local sel = state("sticker.sel", files[1] and files[1].path or nil)
+
+  local rendered
+  if sel.get() then
+    local m = loadlua(sel.get())
+    if type(m) == "table" and m.build then rendered = m.build(ctx)
+    elseif m then rendered = m end
+  end
+
+  local picker = {}
+  for _, f in ipairs(files) do
+    local active = sel.get() == f.path
+    picker[#picker + 1] = button(f.name, function() sel.set(f.path) end,
+      { variant = active and "filled" or "outlined" })
+  end
+
+  return card({
+    row({
+      icon("dashboard_customize_outlined"),
+      spacer(8),
+      expanded(text("动态贴图 (样式切换)", { weight = "bold", size = 16 })),
+    }, { cross = "center" }),
+    text("从 widgets/ 动态加载一个组件贴到这里, 可随时换风格", { color = "grey", size = 12 }),
+    spacer(12),
+    rendered or text("(把 .lua 放进 widgets/ 即可)", { color = "grey" }),
+    spacer(12),
+    wrap(picker, { spacing = 8, runSpacing = 8 }),
+  })
+end
+
 app.page("home", function(ctx)
   local score = state("runner.score", 0)
   local status = state("runner.status", "准备就绪")
@@ -1327,6 +1369,8 @@ app.page("home", function(ctx)
     }),
     -- 流式文本示例: 逐字追加只重绘这一个 Text, 不重跑整页 (适合 AI 逐字输出)
     stream_demo(),
+    -- 动态贴图示例 (loadlua 方式一): 从 widgets/ 挑一个组件贴上来, 可换风格
+    dynamic_sticker_card(ctx),
   }
 end)
 
@@ -1335,16 +1379,124 @@ end)
 -- ============================================================
 app.page("game_full", function()
   local tab = state("game.tab", 1)
+  -- tabs keepalive=false: 只挂载当前标签, 切走即卸载另一个标签 (触发其 love 的 dispose)。
+  -- 旋转三角: keepalive=true + freeze=true → 卸载时仅挂起并冻结时钟, 回来从快照继续。
+  -- 跑酷:     keepalive=false           → 卸载时彻底销毁进程, 回来全新从头启动。
   return tabs({
     active = tab.get(),
+    keepalive = false,
     onSelect = function(i) tab.set(i) end,
     items = {
       { title = "旋转三角", icon = "change_history", content =
-        love{ id = 2, game = SCRIPTS.."/games/demo" } },
+        love{ id = 2, game = SCRIPTS.."/games/demo", keepalive = true, freeze = true } },
       { title = "跑酷", icon = "directions_run", content =
-        love{ id = 3, game = SCRIPTS.."/games/runner" } },
+        love{ id = 3, game = SCRIPTS.."/games/runner", keepalive = false } },
     },
   })
+end)
+
+-- ============================================================
+-- 动态应用页 (loadlua 演示 · 方式二): 浏览 apps/ 下任意脚本, 选中即整屏渲染。
+-- apps/ 下每个脚本 return { title=显示名, build=function(ctx) return 组件 end,
+--   dispose=function() end (可选, 纯 Lua 应用在此清理定时器/资源) }。
+--
+-- 生命周期: 每次【进入/切换】一个应用都全新 loadlua 加载 (状态从头开始);
+-- 【返回选择界面】或【切换到别的应用】时调用上一个的 dispose 释放资源。
+-- (love 应用用 keepalive=false 由进程销毁自动释放; 纯 Lua 应用靠 dispose。)
+-- ============================================================
+local current_module = nil     -- 当前选中应用的模块实例 (每次进入全新加载)
+local current_app_path = nil
+
+local function unload_current_app()
+  if current_module and type(current_module.dispose) == "function" then
+    pcall(current_module.dispose)
+  end
+  current_module = nil
+  current_app_path = nil
+end
+
+app.page("dynamic_apps", function(ctx)
+  local dir = SCRIPTS .. "/apps"
+  local apps = {}
+  for _, e in ipairs(host.list_dir(dir)) do
+    if not e.isDir and e.name:match("%.lua$") then
+      apps[#apps + 1] = { file = e.name, path = e.path }
+    end
+  end
+  table.sort(apps, function(a, b) return a.file < b.file end)
+
+  local sel = state("dynapp.sel", nil)
+
+  if not sel.get() then
+    -- 返回选择界面: 停掉并丢弃当前应用, 下次进入将全新加载 (从头开始)
+    unload_current_app()
+    local kids = {
+      padding(text("选择一个整屏应用/游戏加载", { weight = "bold", size = 16 }), 4),
+      text("把任意 .lua 放进 apps/ 即出现在这里 (return {title=, build=, dispose=})",
+        { color = "grey", size = 12 }),
+      divider(),
+    }
+    for _, a in ipairs(apps) do
+      local m = loadlua(a.path)   -- 仅用于取标题 (一次性, build 未调用 → 无副作用)
+      local title = (type(m) == "table" and m.title) or a.file
+      kids[#kids + 1] = tile(title, {
+        subtitle = a.file,
+        icon = "widgets_outlined",
+        trailing = icon("chevron_right"),
+        onTap = function() sel.set(a.path) end,
+      })
+    end
+    if #apps == 0 then
+      kids[#kids + 1] = padding(text("apps/ 为空", { color = "grey" }), 8)
+    end
+    return kids
+  end
+
+  -- 进入或切换到某应用: 与当前不同则先 dispose 旧的, 再全新加载新的 (状态从头)
+  if current_app_path ~= sel.get() then
+    unload_current_app()
+    current_app_path = sel.get()
+    current_module = loadlua(current_app_path)
+  end
+
+  local m = current_module
+  local title = "应用"
+  local body = text("加载失败, 见日志", { color = "grey" })
+  if type(m) == "table" and m.build then
+    title = m.title or "应用"; body = m.build(ctx)
+  elseif m then
+    body = m
+  end
+
+  local header = {
+    row({
+      iconbutton("arrow_back", function() sel.set(nil) end, { tooltip = "返回选择" }),
+      expanded(text(title, { weight = "bold", size = 16 })),
+      iconbutton("apps", function() sel.set(nil) end, { tooltip = "切换应用" }),
+    }, { cross = "center" }),
+    divider(),
+    expanded(body),
+  }
+
+  -- 每个 app 自己声明卸载/暂停时机 m.unload:
+  --   "hidden" → 切走 nav/tab 或退后台时调用 m.pause() 暂停, 回来调用 m.resume() 继续
+  --              (确定性、无重建竞态; app 的 resume 可选择"继续"或"从头")。
+  --   "back"(默认) → nav/tab 切走时在后台继续跑; 只有【返回/切到别的 app】才 dispose 停掉。
+  -- 两种模式下, 【返回选择界面再进入】都会全新加载 → 从头开始。
+  local unload_mode = (type(m) == "table" and m.unload) or "back"
+  if unload_mode == "hidden" then
+    return lifecycle{
+      fill = true,
+      onHide = function()
+        if type(m) == "table" and type(m.pause) == "function" then pcall(m.pause) end
+      end,
+      onShow = function()
+        if type(m) == "table" and type(m.resume) == "function" then pcall(m.resume) end
+      end,
+      child = column(header, { cross = "stretch" }),
+    }
+  end
+  return column(header, { cross = "stretch", fill = true })
 end)
 
 -- 主页顶栏的两个 Agent 入口按钮已移至受保护的 agent/main.lua,

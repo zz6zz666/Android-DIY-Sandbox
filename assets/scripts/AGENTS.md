@@ -18,8 +18,8 @@ scripts/
 > love 游戏↔UI 的通信桥(`love_host.lua`)由 App 在运行时自动、隐蔽地提供(不落在本工作区),
 > 游戏里直接 `require("love_host")` 即可用,无需你创建或维护它。
 
-- **`main.lua` 是你主要编辑的文件。** 即使把它改崩,`agent/main.lua` 注册的两个 Agent 入口
-  按钮(主页顶栏最左)仍稳定存在——它独立、受保护地先行加载,不受 `main.lua` 影响。
+- **`main.lua` 是你主要编辑的文件。** 即使把它改崩,`agent/main.lua`(独立、受保护地先行加载)
+  注册的两个 Agent 入口按钮(顶栏最左)仍在,不受影响。
 - 全局变量 `SCRIPTS` = 本目录绝对路径(用于拼 game 路径等)。
 - **应用脚本更改**:主页顶栏刷新图标重载(损坏会自动回退快照,15s 倒计时可保留/回退);
   Agent 也可在命令行 `bash agent/app-reload` 主动触发同样的重载(见「十二」)。
@@ -106,6 +106,19 @@ nav.tabs({
 页面 `build(ctx)` 返回单个组件或组件数组(数组默认纵向堆叠;顶层区块**惰性构建**,
 首屏外的区块滚到才建)。`ctx.running` 是 `{ [spawnKey]=bool }` 表,反映后台任务运行态(见 `host.spawn`)。
 
+> **铺满整页**:返回数组或单个普通组件时,页面会套一层滚动容器,内部 `expanded` 会因高度无界
+> 失效(空白/报错)。要铺满(整屏游戏、上中下布局),给**根组件**加 `fill = true`:
+>
+> ```lua
+> return column({
+>   row({ iconbutton("arrow_back", back), text("标题") }),
+>   divider(),
+>   expanded(body),                       -- 撑满剩余空间
+> }, { fill = true })
+> ```
+>
+> `tabs` / `lifecycle` 作根组件时自动铺满。
+
 ### 页内多标签
 
 用 `tabs` 组件在**一个页面内**做多标签切换。标签状态由脚本用 `state` 管理(`active` 从 1 起):
@@ -124,8 +137,9 @@ app.page("tools", function()
 end)
 ```
 
-`tabs` 还支持 `onClose(i)`、`onReorder(from,to)`、`trailing`(标签栏右侧组件)、`empty`(无标签时文案)。
-若某标签内容是整块 `love{}` 画布,切换标签会自动挂起/恢复对应画布。
+`tabs` 还支持 `onClose(i)`、`onReorder(from,to)`、`trailing`(标签栏右侧)、`empty`(无标签文案)。
+默认全部标签常驻(切换只挂起、保留状态);`tabs({ keepalive=false })` 则只挂载当前标签、切走即卸载
+——配合 `love{keepalive=false}` 可实现"切标签销毁另一个游戏进程"。
 
 ### 主页顶栏自定义按钮
 
@@ -171,9 +185,8 @@ app.actions({
 | `inkwell(child, {onTap,radius})`                                  | 水波纹点击区                                                                       |
 | `tooltip(child, msg)`                                             | 长按提示                                                                           |
 
-> **大列表虚拟化**:聊天记录/信息流等超长列表,务必用 `list(items, {scroll=true})`,只构建可视项,
-> 千/万项也流畅;通常放进有界高度容器(如 `box({height=300, child=list(...)})`)。
-> 普通 `column`/`row` 会构建全部子项(布局机制所限,无法惰性)。
+> **长列表虚拟化**:聊天/信息流等超长列表用 `list(items, {scroll=true})`,只建可视项,千万项也流畅;
+> 通常放进有界高度容器(如 `box({height=300, child=list(...)})`)。普通 `column`/`row` 会全量构建。
 
 ### 内容
 
@@ -218,6 +231,7 @@ app.actions({
 | `section(title, children)`                   | 带标题分组                           |
 | `expansion(title, children, {icon})`         | 可展开面板                           |
 | `tabs({...})`                                | 页内多标签(见[第一部分](#页内多标签)) |
+| `lifecycle({child, onShow, onHide, onDispose})` | 可见性生命周期包裹(见[动态加载](#十一动态加载与生命周期)) |
 
 ---
 
@@ -272,7 +286,9 @@ love{ id = 0, game = SCRIPTS.."/games/demo" }
 | `id`               | 画布标识**0..3,必须唯一**。每个 id 是一块独立实例(独立进程),同屏多块须各用不同 id |
 | `game`             | love2d 工程目录绝对路径(内含`main.lua`)                                               |
 | `width`/`height` | 尺寸;作为普通元素时 height 默认 200                                                     |
-| `autopause`        | 默认`true`:切走导航页时自动挂起(停渲染、留内存、不丢状态)                             |
+| `autopause`        | 默认`true`:切走导航页自动挂起(停渲染、留内存、不丢状态)                             |
+| `keepalive`        | 默认`true`:移除时只挂起保留;`false` 则销毁进程,下次挂载全新启动                        |
+| `freeze`           | 默认`false`:挂起时按真实时间推进(回来追补流逝);`true` 冻结游戏时钟、回来从快照续(游戏需 `require("love_host")`) |
 | `onEvent`          | `function(msg)`:收到游戏发来的消息(表)时回调(见下「双向通信」)                        |
 
 `game` 指向一个标准 love2d 工程,`main.lua` 里实现 love 回调(触摸已从 Flutter 转发):
@@ -284,10 +300,13 @@ function love.draw() love.graphics.print("hi", 8, 8) end
 function love.touchpressed(id, x, y) ... end
 ```
 
+> **生命周期(运行/冻结/销毁)**:love 与纯 Lua 共用同一套模型,详见
+> [动态加载与生命周期](#十一动态加载与生命周期)。渲染只在可见时进行。
+
 ### 双向通信(UI ↔ 游戏)
 
-游戏跑在**独立进程、独立 Lua 状态**里,与 App 的 UI 层通过消息通信(底层为本机加密通道,
-消息是任意可 JSON 化的 Lua 表,自动序列化,无需手动编解码):
+游戏在**独立进程、独立 Lua 状态**运行,与 UI 通过消息通信:消息是任意可 JSON 化的 Lua 表,
+自动序列化(底层本机加密通道):
 
 ```lua
 -- UI 侧
@@ -307,10 +326,8 @@ host.emit({ type = "over", score = 1200 })          -- 或直接给整表
 host.connected()                                     -- 是否已连上 UI
 ```
 
-> 说明:`love_host` 是通信桥的**游戏侧**一半——它必须运行在 love 进程自己的 Lua 状态里
-> (Dart 层做的是**宿主侧**那一半),因此以 Lua 形式随游戏加载。App 会把它藏在运行时目录里
-> 自动注入,你在工作区看不到它,也不应修改。love 引擎在进程内无法销毁重启,故画布只有
-> 挂起/恢复(不丢状态),这是设计限制。
+> `love_host` 是通信桥的**游戏侧**一半(宿主侧在 Dart 层),必须跑在 love 进程内,故随游戏加载。
+> App 自动注入到运行时目录,你在工作区看不到、也无需维护。
 
 ### 两种典型用法
 
@@ -417,6 +434,9 @@ ws:close()
 | `host.device_info()`                                              | `{platform,osVersion,locale,screenW,screenH,dpr,darkMode, appVersion,model,brand,sdkInt,...}` |
 
 > 时间/随机也可直接用 Lua 标准库:`os.time()`、`os.date("%Y-%m-%d")`、`math.random()`。
+>
+> **重载自动清理**:刷新键 / `app-reload` 会自动取消上一轮的 `host.interval` 及在途 `http`/`websocket`,
+> 不泄漏;同一轮内不用的定时器仍需自己 `host.clear_interval`。
 
 ---
 
@@ -503,57 +523,119 @@ host.sheet({ title="更多", items = {
 
 ---
 
-## 十一、动态加载脚本(loadlua)
+## 十一、动态加载与生命周期
 
-除了写进 `main.lua`/`app.page` 的常规页面,你可以把**任意 `.lua` 文件放在脚本释放目录任意位置**
-(不注册、默认不加载),需要时用 `loadlua(path)` 在运行时读入并渲染。适合"文件浏览器里挑一个脚本
-→ 加载到页面某处渲染"这类通用动态装配。
+### 用途:静态加载 vs 动态加载
 
-`loadlua(path, ...)` 执行该文件并返回它的返回值(失败返回 `nil` 并把错误写日志控制台)。被加载文件
-通常在末尾 `return` 一个组件表,或一个带 `build(ctx)` 的模块:
+加载其它 `.lua` 有两种方式,区别只在**加载时机**:
+
+- **静态加载**(启动即加载、常驻)——**一般 UI 用它**。写在 `main.lua`,或拆成独立文件用
+  `require("tools")` 引入(加载脚本目录的 `tools.lua`)。建议:主页写在 `main.lua`,其它页简单的可
+  一并留下,复杂的各自拆文件 `require` 进来。
+- **动态加载**(`loadlua`)——**资源较重的元素用它**。作为独立模块按需加载、用完卸载,不常驻、
+  不污染主 Lua 空间。适合偶尔用的整屏应用、重计算、游戏:触发才加载,离开即卸载。
+
+### 模块约定
+
+被加载的 `.lua` 放脚本目录任意位置(不注册、默认不加载),末尾 `return` 一个模块表;
+`build` 返回 UI,`dispose`/`pause`/`resume` 供加载方控制其生命周期(见下节):
 
 ```lua
--- 例:mywidget.lua(放在脚本目录任意处,不需要注册)
+-- apps/hello.lua (无需注册)
 return {
+  title = "Hello",
   build = function(ctx)
-    return card({ padding(16, text("我是被动态加载进来的组件")) })
+    return card({ padding(text("动态加载进来的独立模块"), 16) })
   end,
+  dispose = function() end,   -- 卸载时清理自己的定时器/网络等 (可选)
 }
 ```
 
-主脚本里做一个"选择 + 渲染"的通用 picker(用 state 记住选中的路径):
+`loadlua(path, ...)` 运行时读入并执行,返回该模块表(失败返回 `nil` 并把错误写日志控制台)。
+
+### 加载与卸载
+
+用一个"槽位"承载当前模块:某操作加载,另一操作卸载。卸载 = 调 `dispose` 释放资源 + 丢弃引用
+(可被 GC),从此不占内存、不留在主脚本:
 
 ```lua
-app.page("loader", function(ctx)
-  local dir = SCRIPTS                              -- 脚本释放目录根
-  local picked = state("picked", nil)
-  local items = {}
-  for _, e in ipairs(host.list_dir(dir)) do        -- 浏览目录, 列出 .lua
-    if not e.isDir and e.name:match("%.lua$") then
-      items[#items+1] = tile(e.name, nil, "description", function()
-        state_set("picked", e.path)
-      end)
-    end
-  end
+local current = nil                              -- 当前加载的独立模块 (nil = 未加载)
 
-  local rendered
-  if picked then
-    local m = loadlua(picked)                       -- 动态加载选中的脚本
-    if type(m) == "table" and m.build then rendered = m.build(ctx)
-    else rendered = m end                            -- 也可直接 return 一个组件
-  end
+local function load_mod(path)
+  if current and current.dispose then pcall(current.dispose) end   -- 先卸载旧的
+  current = loadlua(path)                        -- 全新加载 (状态从头)
+end
+local function unload_mod()
+  if current and current.dispose then pcall(current.dispose) end
+  current = nil                                  -- 丢引用 → 释放, 不再常驻
+end
 
-  return column({
-    text("选择一个脚本加载", "titleMedium"),
-    column(items),
+app.page("host", function(ctx)
+  return {
+    row({
+      button("加载", function() load_mod(SCRIPTS .. "/apps/hello.lua") end),
+      button("卸载", unload_mod, { variant = "tonal" }),
+    }, { gap = 8 }),
     divider(),
-    rendered or text("(未选择)"),
-  })
+    (current and current.build) and current.build(ctx) or text("(未加载)", { color = "grey" }),
+  }
 end)
 ```
 
-> 说明:`loadlua` 基于标准 `loadfile`,可用完整 Lua;传入的额外参数会作为被加载文件的 `...`。
-> 加载进来的组件同样能用 `state`/`reactive`/事件回调,与内建组件无差别。
+> 触发方式随意:按钮、菜单、或"浏览目录选一个"(`host.list_dir` 列 `.lua` + `state` 记选中项)都行。
+
+### 生命周期:运行 / 冻结 / 销毁
+
+内容"不可见时(切走导航页 / 切走标签 / 退后台)怎么办"分三态。**渲染永远只在可见时进行**,
+下表只决定**内核/逻辑**的去留。love 画布用属性,纯 Lua 内容用 `lifecycle{}` 包裹,两者一一对应:
+
+| 不可见时 | love 画布 | 纯 Lua 内容 |
+| --- | --- | --- |
+| **运行** 后台继续跑 | `love{ freeze=false }`(默认) | 不包 `lifecycle` |
+| **冻结** 暂停,回来接着 | `love{ freeze=true }` | `lifecycle{ onHide=停, onShow=启 }` |
+| **销毁** 停掉释放,回来从头 | `love{ keepalive=false }` | `lifecycle{ onHide=停并归零 }` |
+
+**纯 Lua 应用没有独立进程**,跑在共享主 VM 里——移出界面只是停渲染,它的 `host.interval`/网络/`spawn`
+**会继续占资源**,必须靠回调主动停。把模块写成带 `pause`/`resume`/`dispose` 的应用,定时器 id 放模块级 upvalue:
+
+```lua
+-- apps/compute.lua 同款: 切走即停、回来从头
+local timer, n = nil, 0
+local function tick() n = n + 1; reactive("compute").set("已算 " .. n .. " 轮") end
+local function start() if not timer then timer = host.interval(200, tick) end end
+local function stop()  if timer then host.clear_interval(timer); timer = nil end end
+return {
+  title = "算力",
+  build = function()
+    reactive("compute", "…"); start()
+    return center(text("", { bind = "compute", size = 22 }))
+  end,
+  pause   = stop,                          -- 切走 → 停 (不在后台白算)
+  resume  = function() n = 0; start() end, -- 回来 → 归零重来 (要"接着跑"就写 start())
+  dispose = stop,                          -- 返回/切换应用 → 彻底停
+}
+```
+
+加载页用 `lifecycle{}` 把可见性接到应用的 pause/resume:
+
+```lua
+lifecycle{
+  fill   = true,                           -- 作页面根且要铺满时加
+  onHide = function() app.pause()  end,    -- 切走 nav/tab 或退后台
+  onShow = function() app.resume() end,    -- 回来
+  child  = your_component,
+}
+```
+
+- 可见性 = 导航页激活 **且** 本标签激活 **且** App 在前台;任一不满足即 `onHide`(移出组件树也算),恢复即 `onShow`。
+- **用确定性的 pause/resume**,不要在 `onShow` 里 `sel.set` 触发重建(会与 onHide 竞态,出现"有时从 0 有时从 9")。
+- 每个应用**每次进入都全新 `loadlua`**(状态从头),定时器只在模块 upvalue 里管理。
+
+> **脚本重载自动清理**:刷新键 / `app-reload` 时,上一轮的 `host.interval`、在途 `http`、`websocket`
+> 由框架自动取消,不会泄漏;但同一轮内不用的定时器仍要自己 `host.clear_interval`。
+
+可运行示例:「动态」页的 `apps/compute.lua`(切走即停)、`apps/compute_bg.lua`(后台续跑)、
+`apps/mini_game.lua`(love,返回销毁)。
 
 ---
 

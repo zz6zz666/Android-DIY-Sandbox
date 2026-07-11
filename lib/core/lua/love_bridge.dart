@@ -30,6 +30,7 @@ class LoveBridge {
     LuaFunctionRef? onEvent,
     String? gamePath,
     required String scriptsDir,
+    bool freeze = false,
   }) {
     final c = _canvases.putIfAbsent(canvasId, () {
       final nc = _Canvas(canvasId, _randomToken());
@@ -38,7 +39,8 @@ class LoveBridge {
     });
     c.onEvent = onEvent;
     if (gamePath != null) _dropBridgeModule(gamePath, scriptsDir);
-    return '--astrbridge=${portOf(canvasId)}:${c.token}';
+    // 第三段 freeze 标志: 1=挂起时冻结游戏时钟(回来从快照继续), 0=按真实时间推进。
+    return '--astrbridge=${portOf(canvasId)}:${c.token}:${freeze ? 1 : 0}';
   }
 
   /// 更新某画布的事件回调(love{} 重建时调用)。

@@ -670,20 +670,25 @@ class LuaRenderer {
         final canvasId = (LuaStyle._num(node['id']) ?? 0).toInt();
         final gamePath = gp == null ? null : '$gp';
         final onEvent = node['onEvent'];
+        final freeze = node['freeze'] == true;
         final bridgeArg = LoveBridge.instance.prepare(
           canvasId: canvasId,
           onEvent: onEvent is LuaFunctionRef ? onEvent : null,
           gamePath: gamePath,
           scriptsDir: ScriptManager.instance.scriptsDir,
+          freeze: freeze,
         );
         return SizedBox(
+          key: ValueKey('love_canvas_$canvasId'),
           width: LuaStyle._d(node['width']),
           height: LuaStyle._d(node['height']) ?? 200,
           child: LoveGameView(
+            key: ValueKey('love_view_$canvasId'),
             canvasId: canvasId,
             gamePath: gamePath,
             bridgeArg: bridgeArg,
             autoSuspend: node['autopause'] != false,
+            keepAlive: node['keepalive'] != false,
           ),
         );
 
@@ -739,7 +744,8 @@ class LuaRenderer {
         return _expansion(context, node);
       case 'tabs':
         return _tabs(context, node);
-
+      case 'lifecycle':
+        return _LuaLifecycle(node: node, renderer: this);
       default:
         return Text('未知组件: ${node['__type']}',
             style: const TextStyle(color: Colors.orange));
@@ -1228,20 +1234,28 @@ class LuaRenderer {
     // 与多导航页完全同等: 非激活标签内的 love 暂停渲染但保留状态与纹理,
     // 激活标签恢复渲染。love 复用同一 State 会导致纹理串台, 故必须保持各自挂载。
     // 标签可见性还需叠加父级(导航页)可见性: 导航页隐藏时, 本页所有标签的 love 都应暂停。
+    // keepalive=false: 只挂载当前标签, 切走即销毁非激活标签子树 (配合 love{keepalive=false}
+    //   可在切标签时彻底销毁其它游戏进程, 而非挂起)。
     final parentActive = LovePageActive.of(context);
+    final bool tabsKeepAlive = node['keepalive'] != false;
     final Widget content = count == 0
         ? Center(child: Text('${node['empty'] ?? ''}'))
-        : IndexedStack(
-            index: active,
-            sizing: StackFit.expand,
-            children: [
-              for (var i = 0; i < count; i++)
-                LovePageActive(
-                  active: parentActive && i == active,
-                  child: build(context, (items[i] as Map)['content']),
-                ),
-            ],
-          );
+        : tabsKeepAlive
+            ? IndexedStack(
+                index: active,
+                sizing: StackFit.expand,
+                children: [
+                  for (var i = 0; i < count; i++)
+                    LovePageActive(
+                      active: parentActive && i == active,
+                      child: build(context, (items[i] as Map)['content']),
+                    ),
+                ],
+              )
+            : LovePageActive(
+                active: parentActive,
+                child: build(context, (items[active] as Map)['content']),
+              );
 
     return Column(
       children: [
@@ -1803,4 +1817,79 @@ class _LuaStepperState extends State<_LuaStepper> {
       steps: steps,
     );
   }
+}
+
+/// 生命周期可见性包裹组件 (纯 Lua 动态内容按需加载/卸载)。
+/// 可见性 = 所在导航页激活 (LovePageActive) 且 App 在前台; 覆盖 nav / tab / 前后台
+/// 的组合变化。回调经 postFrame 派发, 避免在 build 阶段改状态。
+class _LuaLifecycle extends StatefulWidget {
+  const _LuaLifecycle({required this.node, required this.renderer});
+  final Map node;
+  final LuaRenderer renderer;
+  @override
+  State<_LuaLifecycle> createState() => _LuaLifecycleState();
+}
+
+class _LuaLifecycleState extends State<_LuaLifecycle>
+    with WidgetsBindingObserver {
+  bool _appResumed = true;
+  bool _pageActive = true;
+  bool _visible = false;
+  bool _inited = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _pageActive = LovePageActive.of(context);
+    _update();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appResumed = state == AppLifecycleState.resumed;
+    _update();
+  }
+
+  void _fire(Object? fn) {
+    if (fn is! LuaFunctionRef) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      fn.call();
+      widget.renderer.onAction();
+    });
+  }
+
+  void _update() {
+    final v = _pageActive && _appResumed;
+    if (!_inited) {
+      _inited = true;
+      _visible = v; // 首次可见不触发 onShow (内容已在首次渲染)
+      return;
+    }
+    if (v == _visible) return;
+    _visible = v;
+    _fire(widget.node[v ? 'onShow' : 'onHide']);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // 被移出组件树: 若此前仍处可见态, 视作一次隐藏 (统一 onHide 语义); 另发 onDispose。
+    if (_visible) {
+      final fn = widget.node['onHide'];
+      if (fn is LuaFunctionRef) fn.call();
+    }
+    final od = widget.node['onDispose'];
+    if (od is LuaFunctionRef) od.call();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      widget.renderer.build(context, widget.node['child']);
 }

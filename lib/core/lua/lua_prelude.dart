@@ -267,6 +267,9 @@ function tabs(o) return comp("tabs", o or {}) end
 -- game 省略时使用内置示例(弹跳球)。
 -- autopause: 切到其它导航页时自动挂起(停渲染、留内存、不丢状态), 默认 true;
 --            设为 false 则一直渲染。(注: SDL 无法进程内销毁重启, 故只有挂起/恢复)
+-- keepalive: 默认 true — 画布从组件树移除(dispose)时只挂起、保留进程与状态, 再次挂载沿用旧实例;
+--            设为 false — 移除时彻底销毁该画布的独立进程, 下次挂载全新启动(真正从头重载运行)。
+--            用于"动态加载/切换应用"场景: 离开再进入希望游戏完全重来时用 keepalive=false。
 -- onEvent(msg): 收到游戏发来的消息(表)时回调, msg 即游戏侧 host.emit 的内容。
 --
 -- 双向通信(UI ↔ 游戏):
@@ -338,6 +341,16 @@ function app.actions(list) __host_call("register_actions", list or {}) end
 function app.agent_actions(list) __host_call("register_agent_actions", list or {}) end
 nav = {}
 function nav.tabs(list) __host_call("nav_tabs", list) end
+
+-- ==================== 生命周期可见性 ====================
+-- 包裹任意 child, 当它随【导航页 / 页内标签 / 应用前后台】的组合可见性变化时回调,
+-- 用于纯 Lua 动态内容的"按需加载/卸载"(love 画布自带此能力, 纯 Lua 用本组件)。
+--   lifecycle{ child=..., onShow=fn, onHide=fn, onDispose=fn }
+--   onHide:  变为不可见 (切走 nav 页 / 切走 tab / 退后台), 或被移出组件树时(只要之前可见)。
+--   onShow:  从不可见变回可见。首次挂载即可见时【不触发】(内容已在首次渲染)。
+--   onDispose: 组件真正从树移除时 (可选, 区分"暂时隐藏"与"彻底移除")。
+-- 作页面根组件时若要铺满, 传 fill=true。
+function lifecycle(o) return comp("lifecycle", o or {}) end
 
 -- ==================== 动态加载 ====================
 -- loadlua(path[, ...]): 运行时读入并执行脚本释放目录下任意 .lua 文件, 返回其返回值。

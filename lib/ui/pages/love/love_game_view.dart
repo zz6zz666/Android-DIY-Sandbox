@@ -32,6 +32,7 @@ class LoveGameView extends StatefulWidget {
     this.gamePath,
     this.bridgeArg,
     this.autoSuspend = true,
+    this.keepAlive = true,
   });
 
   /// Stable identity of this canvas (0..3). Each distinct id runs in its own
@@ -47,6 +48,12 @@ class LoveGameView extends StatefulWidget {
 
   /// Suspend rendering automatically when the page is hidden (default true).
   final bool autoSuspend;
+
+  /// When true (default), the underlying engine/process is kept alive on
+  /// dispose (only paused) so state survives re-mounts. When false, disposing
+  /// this widget fully destroys the canvas process, so the next mount boots a
+  /// brand-new instance from scratch (true "dynamic reload").
+  final bool keepAlive;
 
   @override
   State<LoveGameView> createState() => _LoveGameViewState();
@@ -141,8 +148,13 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // Keep the engine alive; just stop rendering.
-    _channel.invokeMethod('pause', {'canvasId': widget.canvasId});
+    if (widget.keepAlive) {
+      // Keep the engine alive; just stop rendering (state preserved on re-mount).
+      _channel.invokeMethod('pause', {'canvasId': widget.canvasId});
+    } else {
+      // Fully tear down: kill the canvas process so the next mount starts fresh.
+      _channel.invokeMethod('destroy', {'canvasId': widget.canvasId});
+    }
     super.dispose();
   }
 

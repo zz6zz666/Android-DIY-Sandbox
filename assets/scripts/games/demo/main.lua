@@ -1,4 +1,5 @@
 -- demo.love: colorful rotating shapes
+require("love_host")   -- 启用挂起冻结(freeze)所需的 love.run 包装
 local t = 0
 local colors = {
   {1,0.2,0.3}, {0.2,1,0.4}, {0.2,0.5,1}, {1,0.9,0.2}, {0.8,0.2,1}

@@ -159,15 +159,19 @@ end
 local M = {}
 
 local host, port, token = "127.0.0.1", nil, ""
--- 从 love 注入的参数里取连接信息:--astrbridge=PORT:TOKEN
+local freeze = false        -- 挂起时冻结游戏时钟(回来从快照继续), 由 --astrbridge 第三段决定
+-- 从 love 注入的参数里取连接信息:--astrbridge=PORT:TOKEN[:FREEZE]
 do
   local function scan(t)
     if type(t) ~= "table" then return end
     for _, v in pairs(t) do
       local m = tostring(v):match("^%-%-astrbridge=(.+)$")
       if m then
-        local p, tk = m:match("^(%d+):(.*)$")
-        if p then port = tonumber(p); token = tk or "" end
+        local p, tk, fz = m:match("^(%d+):([^:]*):?(%d*)$")
+        if p then
+          port = tonumber(p); token = tk or ""
+          freeze = (fz == "1")
+        end
       end
     end
   end
@@ -299,10 +303,21 @@ end
 function M.connected() return connected end
 
 -- 自动每帧收发:包装 love.run(11.x 返回主循环函数)。
+-- 若启用 freeze(挂起冻结): 在游戏定义好 love.update 后包裹它, 钳制单帧 dt 上限,
+-- 这样从挂起恢复时那个"补偿真实流逝时间"的巨大 dt 会被限制, 游戏从被挂起的
+-- 快照位置继续, 而不是一下跳到前面。正常帧 dt 远小于上限, 不受影响。
 do
   local base = love and love.run
   if type(base) == "function" then
     love.run = function()
+      if freeze and type(love.update) == "function" then
+        local realupdate = love.update
+        local MAXDT = 1 / 20
+        love.update = function(dt)
+          if dt and dt > MAXDT then dt = MAXDT end
+          return realupdate(dt)
+        end
+      end
       local loop = base()
       if type(loop) == "function" then
         return function()

@@ -40,6 +40,7 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
     private static class Slot {
         TextureRegistry.SurfaceProducer producer;
         ILoveService binder;
+        ServiceConnection conn;
         int width, height;
         boolean started;
         boolean connecting;
@@ -93,6 +94,13 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
                 result.success(null);
                 break;
             }
+            case "destroy": {
+                // 彻底销毁该画布: 杀掉其独立进程 (SDL 无法在进程内重新初始化),
+                // 释放纹理并清空槽位, 下次 start 将全新启动一个进程 → 从头运行。
+                destroy(cid);
+                result.success(null);
+                break;
+            }
             case "touch": {
                 Slot slot = slots[cid];
                 if (slot != null && slot.binder != null) {
@@ -113,14 +121,21 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
 
     private void start(int cid, int w, int h, String path, String bridge, MethodChannel.Result result) {
         if (slots[cid] != null) {
-            // Already allocated: resize if needed.
-            if (w != slots[cid].width || h != slots[cid].height) {
-                slots[cid].width = w;
-                slots[cid].height = h;
-                slots[cid].producer.setSize(w, h);
-                if (slots[cid].binder != null) callBinder(slots[cid].binder, b -> b.resize(w, h));
+            // Already allocated (a fresh widget is re-mounting the same canvas).
+            // Resize if needed, then RESUME rendering onto the current surface:
+            // the previous widget's dispose() paused the (still-alive) engine, so
+            // without an explicit resume here the re-mounted canvas stays frozen.
+            final Slot slot = slots[cid];
+            if (w != slot.width || h != slot.height) {
+                slot.width = w;
+                slot.height = h;
+                if (slot.producer != null) slot.producer.setSize(w, h);
+                if (slot.binder != null) callBinder(slot.binder, b -> b.resize(w, h));
             }
-            result.success(slots[cid].producer.id());
+            if (slot.binder != null && slot.producer != null) {
+                callBinder(slot.binder, b -> b.resumeGame(slot.producer.getSurface()));
+            }
+            result.success(slot.producer.id());
             return;
         }
 
@@ -134,7 +149,7 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
         slot.connecting = true;
 
         Intent intent = new Intent(activity, SLOT_CLASSES[cid]);
-        activity.bindService(intent, new ServiceConnection() {
+        ServiceConnection conn = new ServiceConnection() {
             @Override
             public void onServiceConnected(ComponentName name, IBinder service) {
                 slot.connecting = false;
@@ -151,9 +166,36 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
             public void onServiceDisconnected(ComponentName name) {
                 slot.binder = null;
             }
-        }, Context.BIND_AUTO_CREATE);
+        };
+        slot.conn = conn;
+        activity.bindService(intent, conn, Context.BIND_AUTO_CREATE);
 
         result.success(texId);
+    }
+
+    /** 彻底销毁一个画布槽位: 杀进程 + 解绑 + 释放纹理, 使下次 start 全新启动。 */
+    private void destroy(int cid) {
+        Slot slot = slots[cid];
+        if (slot == null) return;
+        slots[cid] = null;
+        // 先请求服务停止 (stop() 内部会 killProcess, 保证 SDL 全新初始化)。
+        if (slot.binder != null) {
+            callBinder(slot.binder, ILoveService::stop);
+        }
+        // 解绑我们这一侧的连接。
+        if (slot.conn != null) {
+            try {
+                activity.unbindService(slot.conn);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        // 释放 Flutter 纹理。
+        if (slot.producer != null) {
+            try {
+                slot.producer.release();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void callBinder(ILoveService binder, BinderCall block) {

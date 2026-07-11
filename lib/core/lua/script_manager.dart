@@ -33,7 +33,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '70';
+  static const String _defaultScriptsVersion = '88';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -110,6 +110,7 @@ class ScriptManager {
 
   /// 热重载: 清空注册表并重新执行磁盘脚本。
   Future<void> reload() async {
+    _disposeRuntimeResources();
     _pages.clear();
     _navTabs = [];
     _homeActions = [];
@@ -120,6 +121,27 @@ class ScriptManager {
     // 重新开一个干净的 lua_State, 避免残留全局
     _engine.close();
     await initialize();
+  }
+
+  /// 取消上一轮脚本创建的运行时资源 (定时器/网络), 避免重载后旧回调打进已关闭的
+  /// lua_State 造成泄漏或崩溃。love 画布是独立进程, 由各自 keepalive/dispose 管理, 不在此列。
+  void _disposeRuntimeResources() {
+    for (final t in _intervals.values) {
+      t.cancel();
+    }
+    _intervals.clear();
+    for (final tok in _httpCancels.values) {
+      try {
+        tok.cancel('reload');
+      } catch (_) {}
+    }
+    _httpCancels.clear();
+    for (final ws in _sockets.values) {
+      try {
+        ws.close();
+      } catch (_) {}
+    }
+    _sockets.clear();
   }
 
   String get _snapshotDir => '${RuntimeEnvir.configPath}/scripts_snapshot';
@@ -162,7 +184,9 @@ class ScriptManager {
 
   /// 快照保护式热重载: 重载成功后弹出 15s 倒计时对话框, 允许保留或回退。
   /// 重载中途 Lua 语法错误 → 自动回退快照。
-  Future<void> reloadWithGuard() async {
+  /// [silent] 为 true 时不弹倒计时确认框, 直接应用 (供 agent app-reload 使用):
+  /// 仍保留快照/失败自动回退, 只是成功时不打断用户 (agent 入口受保护, 界面改坏可再改)。
+  Future<void> reloadWithGuard({bool silent = false}) async {
     final ctx = Get.context;
     if (ctx == null || !ctx.mounted) return;
     _snapshot();
@@ -173,7 +197,11 @@ class ScriptManager {
       return;
     }
     stateRevision.value++;
-    _showApplyCountdown();
+    if (silent) {
+      _toast('脚本已重载');
+    } else {
+      _showApplyCountdown();
+    }
   }
 
   // ==================== 外部存储授权 (Flutter 层, Lua 无感) ====================
@@ -268,7 +296,8 @@ class ScriptManager {
       case 'reload':
         LuaLog.instance.info('[agent] 收到重载指令, 应用脚本更新');
         reply('OK reloading\n');
-        Future.delayed(const Duration(milliseconds: 50), reloadWithGuard);
+        Future.delayed(
+            const Duration(milliseconds: 50), () => reloadWithGuard(silent: true));
         break;
       case 'ping':
         reply('OK pong\n');
