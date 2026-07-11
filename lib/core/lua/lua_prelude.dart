@@ -128,6 +128,15 @@ function host.read_bytes(path) return __host_call("read_bytes", path) end
 function host.interval(ms, cb) return __host_call("interval", ms, cb) end
 function host.clear_interval(id) return __host_call("clear_interval", id) end
 
+-- 系统通知 (状态栏推送, 点击可拉起 app)。配合前台服务, app 退到后台仍可发送。
+--   local id = host.notify{ title="提醒", body="该喝水了", id=?, ongoing=false, channel=? }
+--   id 省略则自动分配; 用同一 id 再次调用可更新同一条通知。
+--   ongoing=true 为常驻通知(不可滑除); channel 自定义通知渠道名(可选)。
+--   host.cancel_notify(id) 取消某条通知。
+-- 典型用法(后台提醒): host.interval(60000, function() host.notify{title="每分钟提醒"} end)
+function host.notify(spec) return __host_call("notify", spec or {}) end
+function host.cancel_notify(id) return __host_call("cancel_notify", id) end
+
 -- 设备/应用信息: { platform, osVersion, locale, screenW, screenH, dpr, darkMode,
 --   appVersion, buildNumber, packageName, model, brand, sdkInt, ... }
 -- (型号/版本首次调用异步补齐, 下次调用即完整)

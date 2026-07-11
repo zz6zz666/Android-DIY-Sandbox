@@ -1,6 +1,9 @@
 package com.astrbot.astrbot_android;
 
 import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -27,6 +30,8 @@ import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.fragment.app.FragmentActivity;
 import androidx.fragment.app.FragmentManager;
 
@@ -80,6 +85,33 @@ public class MainActivity extends FragmentActivity {
                 flutterEngine.getDartExecutor().getBinaryMessenger(), LoveMultiManager.CHANNEL);
         loveChannel.setMethodCallHandler(
                 new LoveMultiManager(this, flutterEngine.getRenderer()));
+        // 系统通知桥: Lua host.notify / host.cancel_notify 由此发送。
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), "astr_notify")
+                .setMethodCallHandler((call, result) -> {
+                    switch (call.method) {
+                        case "notify": {
+                            int id = call.argument("id") != null
+                                    ? ((Number) call.argument("id")).intValue() : 1;
+                            String title = call.argument("title");
+                            String body = call.argument("body");
+                            String channel = call.argument("channel");
+                            Boolean ongoing = call.argument("ongoing");
+                            postNotification(id, title, body, channel,
+                                    ongoing != null && ongoing);
+                            result.success(id);
+                            break;
+                        }
+                        case "cancel": {
+                            int id = call.argument("id") != null
+                                    ? ((Number) call.argument("id")).intValue() : 1;
+                            NotificationManagerCompat.from(mContext).cancel(id);
+                            result.success(null);
+                            break;
+                        }
+                        default:
+                            result.notImplemented();
+                    }
+                });
         FlutterEngineCache.getInstance().put("my_engine_id", flutterEngine);
         if (flutterFragment == null) {
             flutterFragment = FlutterFragment.withCachedEngine("my_engine_id").build();
@@ -95,6 +127,45 @@ public class MainActivity extends FragmentActivity {
     public void onPostResume() {
         super.onPostResume();
         flutterFragment.onPostResume();
+    }
+
+    private void postNotification(int id, String title, String body, String channelId,
+                                  boolean ongoing) {
+        if (channelId == null || channelId.isEmpty()) channelId = "astrbot_lua_notify";
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager nm =
+                    (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) {
+                NotificationChannel ch = new NotificationChannel(
+                        channelId, "应用通知", NotificationManager.IMPORTANCE_DEFAULT);
+                nm.createNotificationChannel(ch);
+            }
+        }
+        Intent open = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        if (open != null) {
+            open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        } else {
+            open = new Intent();
+        }
+        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            piFlags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        PendingIntent pi = PendingIntent.getActivity(this, id, open, piFlags);
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(getApplicationInfo().icon)
+                .setContentTitle(title != null ? title : "")
+                .setContentText(body != null ? body : "")
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(body != null ? body : ""))
+                .setAutoCancel(!ongoing)
+                .setOngoing(ongoing)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setContentIntent(pi);
+        try {
+            NotificationManagerCompat.from(this).notify(id, b.build());
+        } catch (SecurityException e) {
+            Log.w("MainActivity", "notify denied (no POST_NOTIFICATIONS permission): " + e);
+        }
     }
 
     @Override

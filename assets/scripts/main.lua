@@ -1257,6 +1257,13 @@ local function stream_demo()
       end, { variant = "tonal" }),
     }, { main = "spaceBetween" }),
     text("", { bind = "demo.reply", color = "grey" }),
+    -- 系统通知演示: 3 秒后推送一条 (可退到后台看效果)
+    button("3 秒后发通知", function()
+      host.delay(3000, function()
+        host.notify{ title = "AstrBot 提醒", body = "这是一条来自 Lua 的系统通知 " .. os.date("%H:%M:%S") }
+      end)
+      host.toast("3 秒后推送, 可切到后台")
+    end, { variant = "tonal" }),
     -- 虚拟化长列表演示: 500 项, 仅构建可视项, 瞬开且流畅
     text("虚拟化长列表 (500 项)", { weight = "bold", size = 14 }),
     box({

@@ -9,7 +9,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/dio.dart' as dio show FormData, MultipartFile;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle, AssetManifest, Clipboard, ClipboardData;
+import 'package:flutter/services.dart' show rootBundle, AssetManifest, Clipboard, ClipboardData, MethodChannel;
 import 'package:get/get.dart';
 import 'package:global_repository/global_repository.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -31,7 +31,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '58';
+  static const String _defaultScriptsVersion = '61';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -56,6 +56,10 @@ class ScriptManager {
   final Map<int, CancelToken> _httpCancels = {};
   final Map<int, WebSocket> _sockets = {};
   final Map<int, Timer> _intervals = {};
+
+  // 系统通知: 原生通道 + 自增 id (未指定 id 时使用)。
+  static const MethodChannel _notifyChannel = MethodChannel('astr_notify');
+  int _notifySeq = 1000;
 
   bool get initialized => _initialized;
   List<Map<String, dynamic>> get navTabs => _navTabs;
@@ -340,6 +344,24 @@ class ScriptManager {
     e.registerHandler('store_close', (a) {
       final h = a.isNotEmpty && a[0] is int ? a[0] as int : -1;
       LuaStore.instance.close(h);
+      return null;
+    });
+    // 系统通知 (原生 NotificationManager, 通道 astr_notify)。
+    e.registerHandler('notify', (a) {
+      final spec = a.isNotEmpty && a[0] is Map ? a[0] as Map : const {};
+      final id = spec['id'] is int ? spec['id'] as int : (++_notifySeq);
+      _notifyChannel.invokeMethod('notify', {
+        'id': id,
+        'title': '${spec['title'] ?? ''}',
+        'body': '${spec['body'] ?? spec['text'] ?? ''}',
+        if (spec['channel'] != null) 'channel': '${spec['channel']}',
+        'ongoing': spec['ongoing'] == true,
+      });
+      return id;
+    });
+    e.registerHandler('cancel_notify', (a) {
+      final id = a.isNotEmpty && a[0] is int ? a[0] as int : 1;
+      _notifyChannel.invokeMethod('cancel', {'id': id});
       return null;
     });
     e.registerHandler('toast', (a) {
