@@ -1,4 +1,5 @@
 -- runner.love: tap to jump over obstacles
+local host = require("love_host")   -- 与 app UI 双向通信
 local player, obstacles, score, groundY, speed, spawn, gameover
 
 local function reset()
@@ -10,6 +11,7 @@ local function reset()
   speed = 260
   spawn = 1.0
   gameover = false
+  host.emit("start", {})
 end
 
 local function jump()
@@ -20,7 +22,12 @@ local function jump()
   end
 end
 
-function love.load() reset() end
+function love.load()
+  reset()
+  -- 接收 UI 发来的命令
+  host.on("reset", function() reset() end)
+  host.on("jump", function() jump() end)
+end
 function love.touchpressed(id, x, y) jump() end
 function love.mousepressed(x, y, b) jump() end
 function love.keypressed(k) if k == "space" then jump() end end
@@ -45,12 +52,16 @@ function love.update(dt)
     o.x = o.x - speed * dt
     if o.x + o.w < 0 then
       table.remove(obstacles, i); score = score + 1
+      host.emit("score", { value = score })
     else
       local px1, py1 = player.x - player.size/2, player.y - player.size
       local px2, py2 = player.x + player.size/2, player.y
       local ox1, oy1 = o.x, groundY - o.h
       local ox2, oy2 = o.x + o.w, groundY
-      if px1 < ox2 and px2 > ox1 and py1 < oy2 and py2 > oy1 then gameover = true end
+      if px1 < ox2 and px2 > ox1 and py1 < oy2 and py2 > oy1 then
+        gameover = true
+        host.emit("over", { score = score })
+      end
     end
   end
   speed = speed + dt * 8

@@ -62,7 +62,8 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
                 int w = argInt(call, "width", 1);
                 int h = argInt(call, "height", 1);
                 String path = call.argument("path");
-                start(cid, w, h, path, result);
+                String bridge = call.argument("bridge");
+                start(cid, w, h, path, bridge, result);
                 break;
             }
             case "resize": {
@@ -110,7 +111,7 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
         }
     }
 
-    private void start(int cid, int w, int h, String path, MethodChannel.Result result) {
+    private void start(int cid, int w, int h, String path, String bridge, MethodChannel.Result result) {
         if (slots[cid] != null) {
             // Already allocated: resize if needed.
             if (w != slots[cid].width || h != slots[cid].height) {
@@ -139,7 +140,7 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
                 slot.connecting = false;
                 slot.binder = ILoveService.Stub.asInterface(service);
                 try {
-                    slot.binder.start(slot.producer.getSurface(), slot.width, slot.height, path);
+                    slot.binder.start(slot.producer.getSurface(), slot.width, slot.height, path, bridge);
                     slot.started = true;
                 } catch (RemoteException e) {
                     Log.e(TAG, "start service call failed for canvas " + cid, e);

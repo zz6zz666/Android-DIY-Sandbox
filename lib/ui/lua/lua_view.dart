@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../../core/lua/lua_engine.dart';
+import '../../core/lua/love_bridge.dart';
 import '../../core/lua/script_manager.dart';
 import '../widgets/glass_panel.dart';
 import '../widgets/tab_strip.dart';
@@ -655,15 +656,26 @@ class LuaRenderer {
 
       case 'love':
         final gp = node['game'];
+        final canvasId = (LuaStyle._num(node['id']) ?? 0).toInt();
+        final gamePath = gp == null ? null : '$gp';
+        final onEvent = node['onEvent'];
+        final bridgeArg = LoveBridge.instance.prepare(
+          canvasId: canvasId,
+          onEvent: onEvent is LuaFunctionRef ? onEvent : null,
+          gamePath: gamePath,
+          scriptsDir: ScriptManager.instance.scriptsDir,
+        );
         return SizedBox(
           width: LuaStyle._d(node['width']),
           height: LuaStyle._d(node['height']) ?? 200,
           child: LoveGameView(
-            canvasId: (LuaStyle._num(node['id']) ?? 0).toInt(),
-            gamePath: gp == null ? null : '$gp',
+            canvasId: canvasId,
+            gamePath: gamePath,
+            bridgeArg: bridgeArg,
             autoSuspend: node['autopause'] != false,
           ),
         );
+
 
       // 交互
       case 'button':

@@ -50,10 +50,17 @@ public abstract class LoveService extends Service {
 
     private final ILoveService.Stub binder = new ILoveService.Stub() {
         @Override
-        public void start(Surface surface, int width, int height, String gamePath) {
+        public void start(Surface surface, int width, int height, String gamePath, String bridgeArg) {
+            final String[] args;
+            if (gamePath == null) {
+                args = new String[0];
+            } else if (bridgeArg != null && !bridgeArg.isEmpty()) {
+                args = new String[]{gamePath, bridgeArg};
+            } else {
+                args = new String[]{gamePath};
+            }
             main.post(() -> LoveHost.start(LoveService.this, surface, width, height,
-                LOVE_LIBS, MAIN_SHARED_OBJECT, MAIN_FUNCTION,
-                gamePath != null ? new String[]{gamePath} : new String[0]));
+                LOVE_LIBS, MAIN_SHARED_OBJECT, MAIN_FUNCTION, args));
         }
 
         @Override

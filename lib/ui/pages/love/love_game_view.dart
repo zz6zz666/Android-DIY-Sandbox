@@ -30,6 +30,7 @@ class LoveGameView extends StatefulWidget {
     super.key,
     this.canvasId = 0,
     this.gamePath,
+    this.bridgeArg,
     this.autoSuspend = true,
   });
 
@@ -40,6 +41,9 @@ class LoveGameView extends StatefulWidget {
 
   /// Path to a `.love` archive or a directory with `main.lua`. Null -> sample.
   final String? gamePath;
+
+  /// Extra argument injected into the love game (bidirectional bridge conn info).
+  final String? bridgeArg;
 
   /// Suspend rendering automatically when the page is hidden (default true).
   final bool autoSuspend;
@@ -105,6 +109,7 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
         'width': w,
         'height': h,
         if (widget.gamePath != null) 'path': widget.gamePath,
+        if (widget.bridgeArg != null) 'bridge': widget.bridgeArg,
       });
       if (mounted) {
         setState(() {

@@ -66,6 +66,7 @@ flutter:
     - assets/scripts/games/runner/
     - assets/scripts/agent.lua
     - assets/scripts/main.lua
+    - assets/scripts/love_host.lua
     - assets/scripts/games/demo/main.lua
     - assets/scripts/games/runner/main.lua
 

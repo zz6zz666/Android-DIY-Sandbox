@@ -20,6 +20,7 @@ import '../constants/scripts.dart' show ubuntuPath;
 import '../../ui/controllers/terminal_controller.dart';
 import '../../ui/lua/lua_view.dart';
 import 'lua_engine.dart';
+import 'love_bridge.dart';
 import 'lua_log.dart';
 import 'lua_prelude.dart';
 
@@ -29,7 +30,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '50';
+  static const String _defaultScriptsVersion = '53';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -268,6 +269,18 @@ class ScriptManager {
     });
     e.registerHandler('logerror', (a) {
       LuaLog.instance.error(a.isNotEmpty ? a[0] : '');
+      return null;
+    });
+    // love 双向通信: UI → 游戏发消息 / 组件外登记事件回调。
+    e.registerHandler('love_send', (a) {
+      final id = a.isNotEmpty && a[0] is int ? a[0] as int : 0;
+      final msg = a.length > 1 ? a[1] : null;
+      LoveBridge.instance.send(id, msg);
+      return null;
+    });
+    e.registerHandler('love_on', (a) {
+      final id = a.isNotEmpty && a[0] is int ? a[0] as int : 0;
+      LoveBridge.instance.setHandler(id, cbOf(a, 1));
       return null;
     });
     e.registerHandler('toast', (a) {

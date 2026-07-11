@@ -229,12 +229,38 @@ function expansion(title, children, o) o=o or {}; o.title=title; o.children=chil
 function tabs(o) return comp("tabs", o or {}) end
 
 -- LÖVE (love2d) 动态渲染画布: 一块可与其它 Lua 组件同层排版的"贴纸画布"。
--- love{ id=0, height=200, game="/path/to/game.love 或目录", autopause=true }
+-- love{ id=0, height=200, game="/path/to/game.love 或目录", autopause=true,
+--       onEvent=function(msg) ... end }
 -- id: 画布标识 (0..3), 不同 id 运行在各自独立进程中, 可同屏多块, 默认为 0。
 -- game 省略时使用内置示例(弹跳球)。
 -- autopause: 切到其它导航页时自动挂起(停渲染、留内存、不丢状态), 默认 true;
 --            设为 false 则一直渲染。(注: SDL 无法进程内销毁重启, 故只有挂起/恢复)
-function love(o) return comp("love", o or {}) end
+-- onEvent(msg): 收到游戏发来的消息(表)时回调, msg 即游戏侧 host.emit 的内容。
+--
+-- 双向通信(UI ↔ 游戏):
+--   * UI 发命令给游戏:  love.send(id, { type="reset" })  或  love.send(id, "reset", {..})
+--   * UI 收游戏事件:    love{ onEvent=function(msg) score.set(msg.value) end }
+--                       或  love.on(id, function(msg) ... end)
+--   * 游戏侧(游戏 main.lua 顶部): local host = require("love_host")
+--                       host.on("reset", function() ... end);  host.emit("score",{value=10})
+--   传输为本机加密通道, 消息是任意可 JSON 化的 Lua 表, 自动序列化, 无需手动编解码。
+love = setmetatable({}, {
+  __call = function(_, o) return comp("love", o or {}) end,
+})
+
+-- love.send(id, msg) 或 love.send(id, type, data): 给指定画布的游戏发消息。
+function love.send(id, a, b)
+  local msg
+  if type(a) == "table" then msg = a
+  else msg = b or {}; msg.type = a end
+  return __host_call("love_send", id or 0, msg)
+end
+
+-- love.on(id, fn): 登记某画布的事件回调 (与 love{onEvent=...} 等价, 便于在组件外注册)。
+function love.on(id, fn)
+  return __host_call("love_on", id or 0, fn)
+end
+
 
 -- ==================== 导航目标构造 ====================
 function webview(url) return { type = "webview", url = url } end

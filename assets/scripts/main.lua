@@ -1230,13 +1230,38 @@ local function manage_section()
 end
 
 app.page("home", function(ctx)
+  local score = state("runner.score", 0)
+  local status = state("runner.status", "准备就绪")
   return {
     quick_start_card(ctx),
     napcat_card(ctx),
     env_card(),
     manage_section(),
-    -- 底部横条跑酷示例 (love 画布作为普通 UI 元素, 随主页一起滚动)
-    love{ id = 0, height = 180, game = SCRIPTS.."/games/runner" },
+    -- 双向通信示例: 游戏把分数/状态回传给 UI, 按钮把命令发给游戏
+    card({
+      row({
+        text("跑酷小游戏", { weight = "bold", size = 16 }),
+        text("得分 " .. score.get() .. " · " .. status.get(), { color = "grey" }),
+      }, { main = "spaceBetween" }),
+      row({
+        button("重新开始", function() love.send(0, "reset") end, { variant = "tonal" }),
+        button("让它跳", function() love.send(0, "jump") end, { variant = "tonal" }),
+      }, { gap = 8 }),
+      love{
+        id = 0, height = 220, game = SCRIPTS.."/games/runner",
+        onEvent = function(msg)
+          local t = msg.type
+          local d = msg.data or {}
+          if t == "score" then
+            score.set(d.value or 0)
+          elseif t == "over" then
+            status.set("撞车了")
+          elseif t == "start" then
+            score.set(0); status.set("进行中")
+          end
+        end,
+      },
+    }),
   }
 end)
 
