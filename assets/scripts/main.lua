@@ -966,7 +966,7 @@ local function quick_start_card(ctx)
     tile("监听端口", {
       icon = "settings_ethernet",
       subtitle = "127.0.0.1:" .. dash,
-      trailing = iconbutton("edit", function()
+      trailing = iconbutton("edit_outlined", function()
         host.input({ title = "AstrBot 监听端口", default = tostring(dash), hint = "6185" }, function(v)
           if v and v ~= "" and tonumber(v) then
             ports.set("dashboard", tonumber(v))
@@ -999,7 +999,7 @@ local function env_card()
   for _, s in ipairs(ENV_STEPS) do
     local done = env_installed(s.id)
     children[#children + 1] = tile(s.title, {
-      icon = done and "check_circle" or "error",
+      icon = done and "check_circle" or "error_outline",
       iconColor = done and "green" or "orange",
       subtitle = s.sub,
       trailing = button(done and "重装" or "安装", function()
@@ -1083,7 +1083,7 @@ local function napcat_tile(ins)
   local running = ins.running
   local logged = ins.qq and ins.qq ~= ""
   return tile(ins.name, {
-    icon = running and "play_circle" or "pause_circle",
+    icon = running and "play_circle" or "pause_circle_outline",
     iconColor = running and "green" or nil,
     subtitle = "QQ " .. (logged and ins.qq or "未登录，启动后扫码") .. "\nWebUI " .. tostring(ins.webUiPort),
     trailing = row({
@@ -1091,7 +1091,7 @@ local function napcat_tile(ins)
       iconbutton(running and "stop" or "play_arrow", function()
         if running then NC.stop(ins.id) else NC.start(ins.id) end
       end, { tooltip = running and "停止" or "启动" }),
-      menu("more", {
+      menu("more_vert", {
         { label = "编辑", onTap = function()
           host.input({ title = "编辑账号名", default = ins.name }, function(name)
             if name and name ~= "" then NC.edit(ins.id, name, ins.webUiPort) end
