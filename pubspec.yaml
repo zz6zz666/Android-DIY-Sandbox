@@ -49,6 +49,8 @@ dependencies:
       url: https://github.com/nightmare-space/empty_package
       path: behavior_api
   flutter_foreground_task: ^9.1.0
+  sqlite3: ^3.3.4
+  sqlite3_flutter_libs: ^0.6.0+eol
 
 dev_dependencies:
   flutter_test:

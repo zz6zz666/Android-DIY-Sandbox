@@ -261,6 +261,36 @@ function love.on(id, fn)
   return __host_call("love_on", id or 0, fn)
 end
 
+-- ==================== 持久化存储 (原生 SQLite) ====================
+-- store.open(name) 打开一个数据库(每个 name 一个独立文件, app 重启后数据保留)。
+-- 返回的对象提供三个原生方法, 结构与查询完全用标准 SQL 表达, 不设任何限制:
+--   db.exec(sql)            执行 DDL/DML(建表等), 无返回。
+--   db.run(sql, params?)    执行带 ? 占位参数的写入, 返回 { lastId=.., changes=.. }。
+--   db.query(sql, params?)  查询, 返回行数组;每行是「列名→值」的表。
+--   db.close()              关闭(通常无需调用, 生命周期随 app)。
+-- params 是数组, 依次绑定 SQL 里的 ? (防注入);布尔存为 0/1, 表会转成 JSON 字符串。
+-- 示例:
+--   local db = store.open("notes")
+--   db.exec[[CREATE TABLE IF NOT EXISTS todo(
+--     id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, done INT DEFAULT 0, ts INT)]]
+--   local r = db.run("INSERT INTO todo(text,ts) VALUES(?,?)", { "买菜", os.time() })
+--   print(r.lastId)                                   -- 新行 id
+--   for _, row in ipairs(db.query("SELECT * FROM todo WHERE done=?", {0})) do
+--     print(row.id, row.text)
+--   end
+--   db.run("UPDATE todo SET done=1 WHERE id=?", { r.lastId })
+store = {}
+function store.open(name)
+  local h = __host_call("store_open", name or "default")
+  local db = { handle = h }
+  function db.exec(sql) return __host_call("store_exec", h, sql) end
+  function db.run(sql, params) return __host_call("store_run", h, sql, params or {}) end
+  function db.query(sql, params) return __host_call("store_query", h, sql, params or {}) or {} end
+  function db.close() return __host_call("store_close", h) end
+  return db
+end
+
+
 
 -- ==================== 导航目标构造 ====================
 function webview(url) return { type = "webview", url = url } end

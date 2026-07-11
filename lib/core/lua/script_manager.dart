@@ -22,6 +22,7 @@ import '../../ui/lua/lua_view.dart';
 import 'lua_engine.dart';
 import 'love_bridge.dart';
 import 'lua_log.dart';
+import 'lua_store.dart';
 import 'lua_prelude.dart';
 
 /// Lua 脚本运行时管理器: 加载/执行脚本, 注册 host 能力, 维护页面与导航注册表。
@@ -30,7 +31,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '53';
+  static const String _defaultScriptsVersion = '55';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -60,6 +61,7 @@ class ScriptManager {
   Future<void> initialize() async {
     if (_initialized) return;
     _engine.open();
+    LuaStore.instance.init('${RuntimeEnvir.configPath}/store');
     _registerHandlers();
     await _releaseDefaultScripts();
     try {
@@ -281,6 +283,56 @@ class ScriptManager {
     e.registerHandler('love_on', (a) {
       final id = a.isNotEmpty && a[0] is int ? a[0] as int : 0;
       LoveBridge.instance.setHandler(id, cbOf(a, 1));
+      return null;
+    });
+    // 持久化存储 (原生 SQLite 通道)。
+    List<Object?> paramsOf(Object? p) {
+      if (p is List) return p;
+      if (p is Map) return p.values.toList();
+      return const [];
+    }
+    e.registerHandler('store_open', (a) {
+      final name = a.isNotEmpty ? '${a[0]}' : 'default';
+      try {
+        return LuaStore.instance.open(name);
+      } catch (err) {
+        LuaLog.instance.error('store.open("$name") 失败: $err');
+        return null;
+      }
+    });
+    e.registerHandler('store_exec', (a) {
+      final h = a.isNotEmpty && a[0] is int ? a[0] as int : -1;
+      final sql = a.length > 1 ? '${a[1]}' : '';
+      try {
+        LuaStore.instance.exec(h, sql);
+      } catch (err) {
+        LuaLog.instance.error('store.exec 失败: $err\nSQL: $sql');
+      }
+      return null;
+    });
+    e.registerHandler('store_query', (a) {
+      final h = a.isNotEmpty && a[0] is int ? a[0] as int : -1;
+      final sql = a.length > 1 ? '${a[1]}' : '';
+      try {
+        return LuaStore.instance.query(h, sql, paramsOf(a.length > 2 ? a[2] : null));
+      } catch (err) {
+        LuaLog.instance.error('store.query 失败: $err\nSQL: $sql');
+        return null;
+      }
+    });
+    e.registerHandler('store_run', (a) {
+      final h = a.isNotEmpty && a[0] is int ? a[0] as int : -1;
+      final sql = a.length > 1 ? '${a[1]}' : '';
+      try {
+        return LuaStore.instance.run(h, sql, paramsOf(a.length > 2 ? a[2] : null));
+      } catch (err) {
+        LuaLog.instance.error('store.run 失败: $err\nSQL: $sql');
+        return null;
+      }
+    });
+    e.registerHandler('store_close', (a) {
+      final h = a.isNotEmpty && a[0] is int ? a[0] as int : -1;
+      LuaStore.instance.close(h);
       return null;
     });
     e.registerHandler('toast', (a) {

@@ -4,6 +4,12 @@
 -- 独立 agent 模块 (opencode 引擎: 安装/启动/WebUI 托管), 界面在本文件编排
 local agent = require("agent")
 
+-- 持久化: 底表初始化 (数据在 app 重启后依然保留)
+do
+  local db = store.open("runner")
+  db.exec[[CREATE TABLE IF NOT EXISTS hiscore(id INTEGER PRIMARY KEY, score INT NOT NULL, at TEXT NOT NULL)]]
+end
+
 -- 端口管理: 纯 Lua, 基于通用设置存储 host.get/set (无 Dart 特定端口逻辑)
 local ports = {
   key = { dashboard = "astrbot_dashboard_port", onebot = "astrbot_onebot_ws_port", napcat = "napcat_webui_port" },
@@ -1232,6 +1238,12 @@ end
 app.page("home", function(ctx)
   local score = state("runner.score", 0)
   local status = state("runner.status", "准备就绪")
+  -- 从数据库读历史最高分 (重启 app 后依然存在)
+  local high = 0
+  local db = store.open("runner")
+  for _, row in ipairs(db.query("SELECT MAX(score) AS hi FROM hiscore", {})) do
+    high = tonumber(row.hi) or 0
+  end
   return {
     quick_start_card(ctx),
     napcat_card(ctx),
@@ -1241,7 +1253,8 @@ app.page("home", function(ctx)
     card({
       row({
         text("跑酷小游戏", { weight = "bold", size = 16 }),
-        text("得分 " .. score.get() .. " · " .. status.get(), { color = "grey" }),
+        text("得分 " .. score.get() .. " · " .. status.get() .. " · 最高" .. high .. "分",
+          { color = "grey" }),
       }, { main = "spaceBetween" }),
       row({
         button("重新开始", function() love.send(0, "reset") end, { variant = "tonal" }),
@@ -1256,6 +1269,12 @@ app.page("home", function(ctx)
             score.set(d.value or 0)
           elseif t == "over" then
             status.set("撞车了")
+            -- 撞车时把本次得分写入持久化
+            local finalScore = d.score or score.get()
+            if finalScore > 0 then
+              db.run("INSERT INTO hiscore(score,at) VALUES(?,?)",
+                { finalScore, os.date("%Y-%m-%d %H:%M:%S") })
+            end
           elseif t == "start" then
             score.set(0); status.set("进行中")
           end
