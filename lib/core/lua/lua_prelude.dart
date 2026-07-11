@@ -22,6 +22,9 @@ function host.get(key) return __host_call("get_setting", key) end
 function host.set(key, val) return __host_call("set_setting", key, val) end
 function host.ubuntu_path() return __host_call("ubuntu_path") end
 function host.home_path() return __host_call("home_path") end
+-- 原生共享存储根目录 (通常 /storage/emulated/0)。文件 API 直接接受绝对路径,
+-- 命中外部存储且未授权时会自动在系统层弹窗申请权限, 授权后重试即可。
+function host.storage_path() return __host_call("storage_path") end
 function host.read_file(p) return __host_call("read_file", p) end
 function host.write_file(p, c) return __host_call("write_file", p, c) end
 function host.exists(p) return __host_call("exists", p) end
@@ -335,6 +338,26 @@ function app.actions(list) __host_call("register_actions", list or {}) end
 function app.agent_actions(list) __host_call("register_agent_actions", list or {}) end
 nav = {}
 function nav.tabs(list) __host_call("nav_tabs", list) end
+
+-- ==================== 动态加载 ====================
+-- loadlua(path[, ...]): 运行时读入并执行脚本释放目录下任意 .lua 文件, 返回其返回值。
+-- 该文件默认未注册到主入口/不会自动加载; 用它按需 pick 一个脚本渲染到页面。
+-- 典型: 脚本文件末尾 `return { build = function(ctx) return column{...} end }` 或直接
+-- `return card{...}`; 主 Lua 在某处 `local m = loadlua(path); ... 渲染 m 或 m.build(ctx)`。
+-- 失败返回 nil 并把错误写入日志控制台。额外参数原样传给被加载文件的 `...`。
+function loadlua(path, ...)
+  local chunk, err = loadfile(path)
+  if not chunk then
+    host.error("loadlua 编译失败 ["..tostring(path).."]: "..tostring(err))
+    return nil
+  end
+  local ok, res = pcall(chunk, ...)
+  if not ok then
+    host.error("loadlua 运行失败 ["..tostring(path).."]: "..tostring(res))
+    return nil
+  end
+  return res
+end
 
 -- ==================== JSON (纯 Lua) ====================
 json = {}

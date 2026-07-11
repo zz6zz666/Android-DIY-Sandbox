@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# 触发宿主 App 重新加载 Lua 脚本, 让本轮定制立即生效 (被动触发, App 不做监视/轮询)。
+#
+# 用法 (在容器命令行, 工作目录通常挂载为 /app-lua-runtime):
+#     bash agent/app-reload            # 重载脚本
+#     bash agent/app-reload ping       # 探活
+#
+# 原理: App 启动时在本机回环 127.0.0.1 起一个控制通道, 并把 端口/令牌 写入本目录的
+# .control 文件。本脚本读取后连上去发一条命令即可, 无需 nc (用 bash 内建 /dev/tcp)。
+set -euo pipefail
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+CTRL="$DIR/.control"
+CMD="${1:-reload}"
+
+if [ ! -f "$CTRL" ]; then
+  echo "控制通道未就绪: 找不到 $CTRL" >&2
+  echo "请确认宿主 App 正在运行, 且脚本释放目录已正确挂载。" >&2
+  exit 1
+fi
+
+PORT="$(sed -n '1p' "$CTRL" | tr -d '[:space:]')"
+TOKEN="$(sed -n '2p' "$CTRL" | tr -d '[:space:]')"
+
+if [ -z "$PORT" ] || [ -z "$TOKEN" ]; then
+  echo "控制文件内容无效: $CTRL" >&2
+  exit 1
+fi
+
+if ! exec 3<>"/dev/tcp/127.0.0.1/$PORT"; then
+  echo "无法连接宿主 127.0.0.1:$PORT (App 未运行?)" >&2
+  exit 1
+fi
+
+printf '%s %s\n' "$CMD" "$TOKEN" >&3
+RESP="$(head -n1 <&3 || true)"
+exec 3<&-
+exec 3>&-
+
+echo "宿主响应: ${RESP:-<无>}"
+case "$RESP" in
+  OK*) exit 0 ;;
+  *)   exit 2 ;;
+esac

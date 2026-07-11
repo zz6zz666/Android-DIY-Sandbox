@@ -14,6 +14,7 @@ import 'package:flutter/services.dart' show rootBundle, AssetManifest, Clipboard
 import 'package:get/get.dart';
 import 'package:global_repository/global_repository.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:settings/settings.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -32,7 +33,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '69';
+  static const String _defaultScriptsVersion = '70';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -65,6 +66,16 @@ class ScriptManager {
   static const MethodChannel _notifyChannel = MethodChannel('astr_notify');
   int _notifySeq = 100000;
 
+  // 外部存储 (原生共享存储 /storage/emulated/0 等) 授权状态缓存。
+  // 权限在 Flutter 层按需申请: Lua 文件 API 命中外部路径且未授权时自动弹窗,
+  // Lua 侧完全无感 (无需调用任何权限 API)。
+  bool _extStorageGranted = false;
+  bool _extReqInFlight = false;
+
+  // Agent 控制通道: 本机回环 TCP, 供容器内 agent 用 app-reload 工具被动触发脚本重载。
+  ServerSocket? _agentCtrl;
+  String _agentToken = '';
+
   bool get initialized => _initialized;
   List<Map<String, dynamic>> get navTabs => _navTabs;
   List<Map<String, dynamic>> get homeActions => _homeActions;
@@ -85,6 +96,8 @@ class ScriptManager {
     }
     _registerHandlers();
     await _releaseDefaultScripts();
+    unawaited(_refreshExtStoragePerm());
+    unawaited(_startAgentControl());
     try {
       _engine.doString(kLuaPrelude, chunkName: 'prelude');
       _loadUserScripts();
@@ -161,6 +174,108 @@ class ScriptManager {
     }
     stateRevision.value++;
     _showApplyCountdown();
+  }
+
+  // ==================== 外部存储授权 (Flutter 层, Lua 无感) ====================
+
+  /// 是否为原生外部/共享存储路径 (需 MANAGE_EXTERNAL_STORAGE 权限)。
+  /// 应用私有目录 (/data/data/<pkg>/...) 无需任何权限, 直接放行。
+  static bool _isExternalPath(String p) =>
+      p.startsWith('/storage/') || p.startsWith('/sdcard/');
+
+  Future<void> _refreshExtStoragePerm() async {
+    try {
+      _extStorageGranted = await Permission.manageExternalStorage.isGranted;
+    } catch (_) {}
+  }
+
+  /// 文件类 host 处理器调用: 目标在外部存储且未授权时, 主动在 Flutter 层弹窗申请
+  /// (Lua 无感)。本次调用先返回失败, 用户授权后重试即可成功。返回 true 表示可访问。
+  bool _ensureExternalAccess(String p) {
+    if (!_isExternalPath(p)) return true;
+    if (_extStorageGranted) return true;
+    unawaited(_requestExtStorage(p));
+    return false;
+  }
+
+  Future<void> _requestExtStorage(String p) async {
+    if (_extReqInFlight || _extStorageGranted) return;
+    _extReqInFlight = true;
+    try {
+      LuaLog.instance.warn('访问外部存储需授权, 已弹窗申请 (授权后重试): $p');
+      var st = await Permission.manageExternalStorage.request();
+      if (!st.isGranted) st = await Permission.storage.request();
+      _extStorageGranted = st.isGranted;
+      if (_extStorageGranted) {
+        LuaLog.instance.info('外部存储已授权');
+        stateRevision.value++;
+      }
+    } catch (_) {} finally {
+      _extReqInFlight = false;
+    }
+  }
+
+  // ==================== Agent 控制通道 (回环 TCP, 被动触发重载) ====================
+
+  /// 启动本机回环控制通道; 幂等 (跨 reload 只绑定一次)。
+  /// 端口/令牌写入 <scriptsDir>/agent/.control, 供容器内 app-reload 工具读取。
+  Future<void> _startAgentControl() async {
+    if (_agentCtrl != null) return;
+    try {
+      _agentCtrl =
+          await ServerSocket.bind(InternetAddress.loopbackIPv4, 47700, shared: true);
+    } catch (_) {
+      try {
+        _agentCtrl = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      } catch (_) {
+        return;
+      }
+    }
+    _agentToken =
+        List.generate(16, (_) => math.Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+    try {
+      final ctrl = File('$scriptsDir/agent/.control');
+      ctrl.parent.createSync(recursive: true);
+      ctrl.writeAsStringSync('${_agentCtrl!.port}\n$_agentToken\n');
+    } catch (e) {
+      debugPrint('[ScriptManager] 写入 agent 控制文件失败: $e');
+    }
+    _agentCtrl!.listen((sock) {
+      final buf = StringBuffer();
+      sock.listen((d) {
+        buf.write(utf8.decode(d, allowMalformed: true));
+        final s = buf.toString();
+        if (s.contains('\n')) _handleAgentCommand(s.split('\n').first.trim(), sock);
+      }, onError: (_) {}, cancelOnError: true);
+    }, onError: (_) {});
+  }
+
+  void _handleAgentCommand(String line, Socket sock) {
+    final parts = line.split(RegExp(r'\s+'));
+    final cmd = parts.isNotEmpty ? parts[0] : '';
+    final tok = parts.length > 1 ? parts[1] : '';
+    void reply(String s) {
+      try {
+        sock.write(s);
+        sock.destroy();
+      } catch (_) {}
+    }
+    if (tok != _agentToken || _agentToken.isEmpty) {
+      reply('ERR unauthorized\n');
+      return;
+    }
+    switch (cmd) {
+      case 'reload':
+        LuaLog.instance.info('[agent] 收到重载指令, 应用脚本更新');
+        reply('OK reloading\n');
+        Future.delayed(const Duration(milliseconds: 50), reloadWithGuard);
+        break;
+      case 'ping':
+        reply('OK pong\n');
+        break;
+      default:
+        reply('ERR unknown command: $cmd\n');
+    }
   }
 
   /// 导出整个脚本释放目录 (含 .lua / AGENTS.md / 子目录) 为 zip 到系统下载目录。
@@ -509,32 +624,43 @@ class ScriptManager {
     // 路径
     e.registerHandler('ubuntu_path', (_) => ubuntuPath);
     e.registerHandler('home_path', (_) => RuntimeEnvir.homePath);
+    // 原生共享存储根目录 (需要时文件 API 会自动在 Flutter 层弹窗申请权限)。
+    e.registerHandler('storage_path', (_) => '/storage/emulated/0');
 
-    // 文件系统
+    // 文件系统 (接受绝对路径; 命中外部存储且未授权时自动弹窗申请, 本次返回失败)
     e.registerHandler('read_file', (a) {
       if (a.isEmpty) return null;
-      final f = File('${a[0]}');
+      final p = '${a[0]}';
+      if (!_ensureExternalAccess(p)) return null;
+      final f = File(p);
       return f.existsSync() ? f.readAsStringSync() : null;
     });
     e.registerHandler('write_file', (a) {
       if (a.length < 2) return false;
-      File('${a[0]}').writeAsStringSync('${a[1]}');
+      final p = '${a[0]}';
+      if (!_ensureExternalAccess(p)) return false;
+      File(p).writeAsStringSync('${a[1]}');
       return true;
     });
     e.registerHandler('exists', (a) {
       if (a.isEmpty) return false;
       final p = '${a[0]}';
+      if (!_ensureExternalAccess(p)) return false;
       return File(p).existsSync() || Directory(p).existsSync();
     });
     e.registerHandler('delete_dir', (a) {
       if (a.isEmpty) return false;
-      final d = Directory('${a[0]}');
+      final p = '${a[0]}';
+      if (!_ensureExternalAccess(p)) return false;
+      final d = Directory(p);
       if (d.existsSync()) d.deleteSync(recursive: true);
       return true;
     });
     e.registerHandler('delete_file', (a) {
       if (a.isEmpty) return false;
-      final f = File('${a[0]}');
+      final p = '${a[0]}';
+      if (!_ensureExternalAccess(p)) return false;
+      final f = File(p);
       if (f.existsSync()) f.deleteSync();
       return true;
     });
@@ -631,7 +757,9 @@ class ScriptManager {
     });
     e.registerHandler('list_dir', (a) {
       if (a.isEmpty) return const [];
-      final d = Directory('${a[0]}');
+      final p = '${a[0]}';
+      if (!_ensureExternalAccess(p)) return const [];
+      final d = Directory(p);
       if (!d.existsSync()) return const [];
       return [
         for (final ent in d.listSync())
@@ -648,7 +776,9 @@ class ScriptManager {
         (_) => '/storage/emulated/0/Download/AstrBotBubble');
     e.registerHandler('mkdirs', (a) {
       if (a.isNotEmpty) {
-        final d = Directory('${a[0]}');
+        final p = '${a[0]}';
+        if (!_ensureExternalAccess(p)) return null;
+        final d = Directory(p);
         if (!d.existsSync()) d.createSync(recursive: true);
       }
       return null;
@@ -1024,9 +1154,11 @@ class ScriptManager {
     e.registerHandler('write_bytes', (a) {
       // write_bytes(path, base64Str) -> bool
       if (a.length < 2) return false;
+      final p = '${a[0]}';
+      if (!_ensureExternalAccess(p)) return false;
       try {
         final bytes = base64.decode('${a[1]}');
-        final f = File('${a[0]}');
+        final f = File(p);
         f.parent.createSync(recursive: true);
         f.writeAsBytesSync(bytes);
         return true;
@@ -1037,7 +1169,9 @@ class ScriptManager {
     e.registerHandler('read_bytes', (a) {
       // read_bytes(path) -> base64Str | nil
       if (a.isEmpty) return null;
-      final f = File('${a[0]}');
+      final p = '${a[0]}';
+      if (!_ensureExternalAccess(p)) return null;
+      final f = File(p);
       if (!f.existsSync()) return null;
       try {
         return base64.encode(f.readAsBytesSync());

@@ -10,6 +10,7 @@
 scripts/
   main.lua          用户主脚本 (入口, 自由定制: 导航/页面/组件)
   agent/main.lua    Agent 入口 (用户可见可改, 但一般不必动; 独立且受保护地加载)
+  agent/app-reload  命令行工具: 改完脚本后触发 App 重载 (bash agent/app-reload)
   AGENTS.md         本文档
   games/            love 小游戏 (每个子目录一个 main.lua)
 ```
@@ -20,7 +21,8 @@ scripts/
 - **`main.lua` 是你主要编辑的文件。** 即使把它改崩,`agent/main.lua` 注册的两个 Agent 入口
   按钮(主页顶栏最左)仍稳定存在——它独立、受保护地先行加载,不受 `main.lua` 影响。
 - 全局变量 `SCRIPTS` = 本目录绝对路径(用于拼 game 路径等)。
-- **应用脚本更改**:主页顶栏刷新图标重载(损坏会自动回退快照,15s 倒计时可保留/回退)。
+- **应用脚本更改**:主页顶栏刷新图标重载(损坏会自动回退快照,15s 倒计时可保留/回退);
+  Agent 也可在命令行 `bash agent/app-reload` 主动触发同样的重载(见「十二」)。
 - **导入 / 导出**:设置页顶栏两个图标,以 zip 形式导出/替换**整个本目录**(脚本+文档一起)。
 - **引擎**:LuaJIT 2.1,完整标准库(`string/table/math/os/io/bit/ffi/coroutine`)全部可用。
 
@@ -478,6 +480,7 @@ host.sheet({ title="更多", items = {
 | `host.exists(p)` / `host.delete_file(p)` / `host.delete_dir(p)`                                             | 文件操作                                                                  |
 | `host.list_dir(p)` → `{{name,path,isDir},...}` / `host.mkdirs(p)`                                          | 目录                                                                      |
 | `host.home_path()` / `host.ubuntu_path()` / `host.bin_path()` / `host.tmp_path()` / `host.backup_dir()` | 常用路径                                                                  |
+| `host.storage_path()`                                                                                          | 原生共享存储根 (通常 `/storage/emulated/0`)                             |
 | `host.clipboard.copy(s)` / `host.clipboard.paste()`                                                           | 剪贴板                                                                    |
 | `host.open_url(url)` / `host.exit_app()`                                                                      | 外链 / 退出                                                               |
 | `host.webview_open(url, title?)`                                                                                | 在内嵌 WebUI 标签打开一个网页                                              |
@@ -493,9 +496,84 @@ host.sheet({ title="更多", items = {
 > **把容器命令绑到按钮**:`button("启动服务", function() host.spawn("cd /root/app && python run.py", "服务", "svc") end)`,
 > 再用 `ctx.running["svc"]` 显示运行态、`host.stop("svc")` 停止。
 
+> **访问原生安卓存储**:所有文件 API 都直接接受**绝对路径**,除了应用私有目录/容器目录外,也能读写
+> 原生共享存储(`/storage/emulated/0/...`,用 `host.storage_path()` 取根)。首次命中外部路径且未授权时,
+> App 会**自动在系统层弹窗申请权限**(Lua 无需做任何权限处理);用户授权后重试该调用即可成功。
+> 例:`host.write_file(host.storage_path().."/Download/note.txt", "hi")`。
+
 ---
 
-## 十一、持久化存储(原生 SQLite)
+## 十一、动态加载脚本(loadlua)
+
+除了写进 `main.lua`/`app.page` 的常规页面,你可以把**任意 `.lua` 文件放在脚本释放目录任意位置**
+(不注册、默认不加载),需要时用 `loadlua(path)` 在运行时读入并渲染。适合"文件浏览器里挑一个脚本
+→ 加载到页面某处渲染"这类通用动态装配。
+
+`loadlua(path, ...)` 执行该文件并返回它的返回值(失败返回 `nil` 并把错误写日志控制台)。被加载文件
+通常在末尾 `return` 一个组件表,或一个带 `build(ctx)` 的模块:
+
+```lua
+-- 例:mywidget.lua(放在脚本目录任意处,不需要注册)
+return {
+  build = function(ctx)
+    return card({ padding(16, text("我是被动态加载进来的组件")) })
+  end,
+}
+```
+
+主脚本里做一个"选择 + 渲染"的通用 picker(用 state 记住选中的路径):
+
+```lua
+app.page("loader", function(ctx)
+  local dir = SCRIPTS                              -- 脚本释放目录根
+  local picked = state("picked", nil)
+  local items = {}
+  for _, e in ipairs(host.list_dir(dir)) do        -- 浏览目录, 列出 .lua
+    if not e.isDir and e.name:match("%.lua$") then
+      items[#items+1] = tile(e.name, nil, "description", function()
+        state_set("picked", e.path)
+      end)
+    end
+  end
+
+  local rendered
+  if picked then
+    local m = loadlua(picked)                       -- 动态加载选中的脚本
+    if type(m) == "table" and m.build then rendered = m.build(ctx)
+    else rendered = m end                            -- 也可直接 return 一个组件
+  end
+
+  return column({
+    text("选择一个脚本加载", "titleMedium"),
+    column(items),
+    divider(),
+    rendered or text("(未选择)"),
+  })
+end)
+```
+
+> 说明:`loadlua` 基于标准 `loadfile`,可用完整 Lua;传入的额外参数会作为被加载文件的 `...`。
+> 加载进来的组件同样能用 `state`/`reactive`/事件回调,与内建组件无差别。
+
+---
+
+## 十二、Agent 触发脚本重载(app-reload)
+
+Agent 在容器里改完 `.lua` 后,脚本**不会自动生效**(App 不做监视/轮询)。让改动立即生效有两种方式:
+用户点主页刷新键,或 **Agent 主动在命令行触发**一次重载(推荐给自动化流程):
+
+```sh
+bash agent/app-reload          # 通知宿主 App 重新加载全部脚本
+bash agent/app-reload ping     # 探活(确认 App 在运行)
+```
+
+原理:App 在本机回环起了一个控制通道,把 `端口/令牌` 写入 `agent/.control`;`app-reload` 读取后
+连上去发一条命令即可(用 bash 内建 `/dev/tcp`,不依赖 `nc`)。重载走的是与刷新键相同的**快照保护**
+流程:加载失败会自动回退到上一版可用脚本。
+
+---
+
+## 十三、持久化存储(原生 SQLite)
 
 结构与查询完全用标准 SQL 表达,不设封装天花板。每个 `name` 一个独立 `.db` 文件(隔离/备份/删除方便)。
 
@@ -521,7 +599,7 @@ db.close()                                       -- 可选, 生命周期随 App
 
 ---
 
-## 十二、JSON
+## 十四、JSON
 
 纯 Lua 实现:
 

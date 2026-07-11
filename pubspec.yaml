@@ -69,6 +69,7 @@ flutter:
     - assets/scripts/games/runner/
     - assets/scripts/agent.lua
     - assets/scripts/agent/main.lua
+    - assets/scripts/agent/app-reload
     - assets/scripts/main.lua
     - assets/scripts/AGENTS.md
     - assets/scripts/games/demo/main.lua
