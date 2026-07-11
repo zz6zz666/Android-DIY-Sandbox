@@ -33,6 +33,7 @@ class LoveGameView extends StatefulWidget {
     this.bridgeArg,
     this.autoSuspend = true,
     this.keepAlive = true,
+    this.quarterTurns = 0,
   });
 
   /// Stable identity of this canvas (0..3). Each distinct id runs in its own
@@ -54,6 +55,12 @@ class LoveGameView extends StatefulWidget {
   /// this widget fully destroys the canvas process, so the next mount boots a
   /// brand-new instance from scratch (true "dynamic reload").
   final bool keepAlive;
+
+  /// Quarter turns (0/1/3) to rotate the game 90° while the app frame stays
+  /// portrait: the underlying engine renders into a landscape surface (width/
+  /// height swapped) and the texture is displayed rotated to fill this widget,
+  /// with touch input transformed to match. 1 = clockwise, 3 = counter-clockwise.
+  final int quarterTurns;
 
   @override
   State<LoveGameView> createState() => _LoveGameViewState();
@@ -160,8 +167,22 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
 
   void _sendTouch(int action, Offset local) {
     if (!_running) return;
-    final double nx = (local.dx / _logW).clamp(0.0, 1.0);
-    final double ny = (local.dy / _logH).clamp(0.0, 1.0);
+    final double px = (local.dx / _logW).clamp(0.0, 1.0);
+    final double py = (local.dy / _logH).clamp(0.0, 1.0);
+    double nx, ny;
+    switch (widget.quarterTurns) {
+      case 1: // clockwise: game is landscape, displayed rotated 90° CW
+        nx = py;
+        ny = 1.0 - px;
+        break;
+      case 3: // counter-clockwise
+        nx = 1.0 - py;
+        ny = px;
+        break;
+      default:
+        nx = px;
+        ny = py;
+    }
     _channel.invokeMethod('touch', {
       'canvasId': widget.canvasId,
       'id': 0,
@@ -175,12 +196,17 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     final dpr = MediaQuery.of(context).devicePixelRatio;
+    final bool rotated = widget.quarterTurns == 1 || widget.quarterTurns == 3;
     return LayoutBuilder(
       builder: (context, constraints) {
         _logW = constraints.maxWidth;
         _logH = constraints.maxHeight;
-        final int w = (constraints.maxWidth * dpr).round().clamp(1, 4096);
-        final int h = (constraints.maxHeight * dpr).round().clamp(1, 4096);
+        // The underlying engine renders into a surface sized to the *displayed*
+        // orientation. When rotated 90°, the game is landscape, so swap dims.
+        final int bw = (constraints.maxWidth * dpr).round().clamp(1, 4096);
+        final int bh = (constraints.maxHeight * dpr).round().clamp(1, 4096);
+        final int w = rotated ? bh : bw;
+        final int h = rotated ? bw : bh;
 
         if (_textureId == null) {
           WidgetsBinding.instance.addPostFrameCallback((_) => _ensureStarted(w, h));
@@ -193,13 +219,17 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
           WidgetsBinding.instance.addPostFrameCallback((_) => _resize(w, h));
         }
 
+        Widget tex = Texture(textureId: _textureId!);
+        if (rotated) {
+          tex = RotatedBox(quarterTurns: widget.quarterTurns, child: tex);
+        }
         return Listener(
           behavior: HitTestBehavior.opaque,
           onPointerDown: (e) => _sendTouch(0, e.localPosition), // ACTION_DOWN
           onPointerMove: (e) => _sendTouch(2, e.localPosition), // ACTION_MOVE
           onPointerUp: (e) => _sendTouch(1, e.localPosition), // ACTION_UP
           onPointerCancel: (e) => _sendTouch(3, e.localPosition), // ACTION_CANCEL
-          child: Texture(textureId: _textureId!),
+          child: tex,
         );
       },
     );

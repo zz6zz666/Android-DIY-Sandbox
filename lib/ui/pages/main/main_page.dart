@@ -28,13 +28,13 @@ class _MainPageState extends State<MainPage> {
   bool _showSettings = false;
 
   /// 由 Lua 脚本定义的导航 tab; 为空(main.lua 缺失/损坏)时回退到内置三页:
-  /// 主页(空白) / WebUI(空) / 终端 —— 保证脚本挂掉也能进终端与设置自救。
+  /// 主页(空白) / Web(空) / 终端 —— 保证脚本挂掉也能进终端与设置自救。
   List<Map<String, dynamic>> get _tabs {
     final t = ScriptManager.instance.navTabs;
     if (t.isEmpty) {
       return [
         {'title': '主页', 'icon': 'home', 'page': 'home'},
-        {'title': 'WebUI', 'icon': 'language', 'page': {'type': 'webview'}},
+        {'title': 'Web', 'icon': 'language', 'page': {'type': 'webview'}},
         {'title': '终端', 'icon': 'terminal', 'page': 'terminal'},
       ];
     }

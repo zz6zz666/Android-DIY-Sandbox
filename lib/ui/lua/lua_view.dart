@@ -684,6 +684,8 @@ class LuaRenderer {
         final gamePath = gp == null ? null : '$gp';
         final onEvent = node['onEvent'];
         final freeze = node['freeze'] == true;
+        final rot = '${node['rotate'] ?? ''}'.toLowerCase();
+        final int quarterTurns = rot == 'cw' ? 1 : (rot == 'ccw' ? 3 : 0);
         final bridgeArg = LoveBridge.instance.prepare(
           canvasId: canvasId,
           onEvent: onEvent is LuaFunctionRef ? onEvent : null,
@@ -702,6 +704,7 @@ class LuaRenderer {
             bridgeArg: bridgeArg,
             autoSuspend: node['autopause'] != false,
             keepAlive: node['keepalive'] != false,
+            quarterTurns: quarterTurns,
           ),
         );
 

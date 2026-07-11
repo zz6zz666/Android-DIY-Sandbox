@@ -23,7 +23,7 @@ nav.tabs({
   { title = "网络",  icon = "cloud_outlined",          page = "network" },
   { title = "文件",  icon = "folder_open_outlined",    page = "files" },
   { title = "游戏",  icon = "sports_esports_outlined", page = "games" },
-  { title = "WebUI", icon = "language",                page = webview() },
+  { title = "Web", icon = "language",                page = webview() },
   { title = "终端",  icon = "terminal",                page = terminal() },
 })
 
@@ -431,6 +431,12 @@ app.page("home", function(ctx)
         btn_desc("file_upload_outlined", "将 lua 目录备份至系统下载目录"),
         spacer(12),
         btn_desc("article_outlined", "查看 Lua 脚本运行日志"),
+      }),
+      spacer(10),
+      card("导航栏手势", {
+        btn_desc("language", "在 Web 页面, 再次点击导航栏 Web 图标以唤起 Web 导航栏"),
+        spacer(12),
+        btn_desc("terminal", "在终端页面, 再次点击导航栏终端图标以显示更多操作"),
       }),
       spacer(10),
       card({
@@ -1022,6 +1028,30 @@ app.page("games", function()
           },
           button("重开", function() love.send(1, "reset") end, { icon = "refresh", variant = "tonal" }),
         }, { gap = 10 }),
+      },
+      {
+        title = "横屏", icon = "screen_rotation",
+        content = (function()
+          local dir = state("games.rot", "cw")
+          return column({
+            card({
+              row({
+                expanded(column({
+                  text("横屏渲染 · rotate", { weight = "bold" }),
+                  text("主框架仍竖屏; 引擎按横屏渲染、触摸同步换算, 把手机转 90° 即可正立游玩。",
+                    { size = 12, color = "grey" }),
+                })),
+                spacer(8),
+                segmented({
+                  value = dir.get(),
+                  options = { { label = "顺时针", value = "cw" }, { label = "逆时针", value = "ccw" } },
+                  onChanged = function(v) dir.set(v) end,
+                }),
+              }, { cross = "center" }),
+            }),
+            expanded(love{ id = 2, game = SCRIPTS .. "/games/demo", rotate = dir.get() }),
+          }, { fill = true, gap = 10 })
+        end)(),
       },
     },
   })

@@ -20,7 +20,11 @@ import android.os.Vibrator;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.DisplayCutout;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -68,6 +72,7 @@ public class MainActivity extends FragmentActivity {
         super.onCreate(savedInstanceState);
         mContext = this;
         setContentView(com.diysandbox.android.R.layout.my_activity_layout);
+        hideNavigationBar();
 
         flutterFragment = (FlutterFragment) fragmentManager.findFragmentByTag(TAG_FLUTTER_FRAGMENT);
         FlutterEngine flutterEngine = new FlutterEngine(this, null, false);
@@ -127,6 +132,36 @@ public class MainActivity extends FragmentActivity {
     public void onPostResume() {
         super.onPostResume();
         flutterFragment.onPostResume();
+        hideNavigationBar();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // 每次重新获得焦点时(含从最近任务返回、用户上滑短暂唤出系统栏后)重新隐藏三键导航栏,
+        // 保证从启动到全程始终隐藏(粘性沉浸),但保留顶部状态栏。
+        if (hasFocus) hideNavigationBar();
+    }
+
+    /** 隐藏底部三键/手势导航栏(粘性沉浸),保留状态栏。全程强制,启动即生效。 */
+    private void hideNavigationBar() {
+        Window window = getWindow();
+        if (window == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false);
+            WindowInsetsController c = window.getInsetsController();
+            if (c != null) {
+                c.hide(WindowInsets.Type.navigationBars());
+                c.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            window.getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        }
     }
 
     private void postNotification(int id, String title, String body, String channelId,

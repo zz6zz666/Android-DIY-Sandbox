@@ -296,6 +296,7 @@ love{ id = 0, game = SCRIPTS.."/games/mygame" }
 | `autopause`        | 默认`true`:切走导航页自动挂起(停渲染、留内存、不丢状态)                                                             |
 | `keepalive`        | 默认`true`:移除时只挂起保留;`false` 则销毁进程,下次挂载全新启动                                                   |
 | `freeze`           | 默认`false`:挂起时按真实时间推进(回来追补流逝);`true` 冻结游戏时钟、回来从快照续(游戏需 `require("love_host")`) |
+| `rotate`           | 横屏游戏:`"cw"` 顺时针 / `"ccw"` 逆时针 强制旋转 90° 渲染(引擎按横屏渲染,触摸同步换算);省略=不旋转。主框架仍竖屏,玩家把手机转 90° 即可横屏游玩 |
 | `onEvent`          | `function(msg)`:收到游戏发来的消息(表)时回调(见下「双向通信」)                                                      |
 
 `game` 指向一个标准 love2d 工程,`main.lua` 里实现 love 回调(触摸已从 Flutter 转发):
@@ -363,6 +364,20 @@ card("今日", {
     expanded(text("一段说明文字……")),
   }),
 })
+```
+
+**③ 横屏游玩(主框架保持竖屏)**。App 主体始终竖屏;若某游戏想横屏,给 `love{}` 加 `rotate`,
+引擎便按横屏(宽高对调)渲染、并把触摸坐标同步换算——玩家把手机顺/逆时针转 90° 即得正立横屏画面。
+整页铺满时效果最佳:
+
+```lua
+app.page("game", function()
+  return column({
+    row({ iconbutton("arrow_back", function() nav.go("home") end), text("横屏游戏") }),
+    divider(),
+    expanded(love{ id=0, game=SCRIPTS.."/games/mygame", rotate="cw" }),   -- 顺时针; 逆时针用 "ccw"
+  }, { fill = true })
+end)
 ```
 
 ---
