@@ -27,6 +27,9 @@ class WebViewTabManager {
   final RxnInt editingIndex = RxnInt();
   bool _editingIsNew = false;
 
+  // 标签页被关闭时回调 (tabId) — 预留: 供 Lua 层得知 WebUI 标签关闭
+  void Function(String tabId)? onTabClosed;
+
   /// 打开一个 URL: 若已存在相同 URL 的标签则切换过去 (去重), 否则新建。
   void openUrl(String url, String title) {
     final norm = url.trim();
@@ -51,6 +54,7 @@ class WebViewTabManager {
     final tab = tabs.removeAt(index);
     tab.controller.clearCache();
     tab.controller.dispose();
+    onTabClosed?.call(tab.id);
     if (tabs.isEmpty) {
       activeIndex.value = 0;
     } else if (activeIndex.value >= tabs.length) {

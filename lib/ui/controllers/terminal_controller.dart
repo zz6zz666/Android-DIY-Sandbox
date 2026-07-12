@@ -144,6 +144,17 @@ class HomeController extends GetxController {
 
     // 初始化终端标签页管理器
     terminalTabManager = TerminalTabManager();
+    terminalTabManager.onTabClosed = (tabId) {
+      // 用户手动关闭终端标签页 → 反查 spawn key 并更新运行态
+      final key = _spawnTabIds.entries
+          .where((e) => e.value == tabId)
+          .map((e) => e.key)
+          .firstOrNull;
+      if (key != null) {
+        _spawnTabIds.remove(key);
+        _setSpawnRunning(key, false);
+      }
+    };
 
     _loadUiPreferences();
 

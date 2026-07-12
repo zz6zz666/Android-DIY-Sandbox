@@ -698,7 +698,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return ListTile(
       leading: const Icon(Icons.delete_outline),
       title: const Text('清空本应用 WebView 缓存'),
-      subtitle: const Text('只清理泡泡版 WebView 缓存和本应用保存的密码'),
+      subtitle: const Text('只清理本应用 WebView 缓存和本应用保存的密码'),
       onTap: () async {
         try {
           for (final t in Get.find<HomeController>().webViewTabManager.tabs) {

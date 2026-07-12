@@ -99,6 +99,7 @@ android {
     project.android.applicationVariants.all { variant ->
         variant.outputs.each { output ->
             output.versionCodeOverride = flutter.versionCode
+            output.outputFileName = "Android-DIY-Sandbox-v${variant.versionName}-${variant.buildType.name}.apk"
         }
     }
 

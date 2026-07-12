@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:get/get.dart';
 import 'package:global_repository/global_repository.dart';
@@ -23,6 +25,7 @@ class TerminalTab {
   final Pty? pty;
   bool isActive;
   String _logText = '';
+  StreamSubscription? _ptySubscription;
 
   TerminalTab({
     required this.id,
@@ -60,6 +63,9 @@ class TerminalTabManager extends GetxController {
   // 当前激活的标签页索引
   final RxInt activeTabIndex = 0.obs;
 
+  // 标签页被关闭时回调 (tabId) — 供 HomeController 清理 spawn 运行态
+  void Function(String tabId)? onTabClosed;
+
   /// 添加新的系统终端标签页
   Future<void> addSystemTerminalTab() async {
     try {
@@ -92,7 +98,8 @@ class TerminalTabManager extends GetxController {
       };
 
       // 监听PTY输出，等待登录完成后再创建标签页
-      newPty.output
+      StreamSubscription? ptySub;
+      ptySub = newPty.output
           .cast<List<int>>()
           .transform(const Utf8Decoder(allowMalformed: true))
           .listen((event) {
@@ -111,6 +118,7 @@ class TerminalTabManager extends GetxController {
             isActive: false,
           );
           createdTab = newTab;
+          newTab._ptySubscription = ptySub;
 
           // 将所有现有标签页设为非激活状态
           for (var tab in tabs) {
@@ -189,7 +197,7 @@ class TerminalTabManager extends GetxController {
         onCommandDone?.call();
       }
 
-      newPty.output
+      newTab._ptySubscription = newPty.output
           .cast<List<int>>()
           .transform(const Utf8Decoder(allowMalformed: true))
           .listen((event) {
@@ -246,14 +254,31 @@ class TerminalTabManager extends GetxController {
     final tab = tabs[index];
 
     try {
-      // 关闭PTY
+      // 先取消输出流订阅，防止旧的流写已释放的 tab/terminal
+      tab._ptySubscription?.cancel();
+      tab._ptySubscription = null;
+
       if (tab.pty != null) {
-        tab.pty!.kill();
-        Log.i('关闭终端PTY: ${tab.title}', tag: 'TerminalTabManager');
+        final pid = tab.pty!.pid;
+        final killed = tab.pty!.kill();
+        Log.i('关闭终端PTY: ${tab.title} (PID: $pid, SIGTERM sent: $killed)',
+            tag: 'TerminalTabManager');
+        // 2秒后强制 SIGKILL，防止进程无视 SIGTERM
+        Future.delayed(const Duration(seconds: 2), () {
+          try {
+            Process.killPid(pid, ProcessSignal.sigkill);
+            Log.i('强制终止PID: $pid (SIGKILL)', tag: 'TerminalTabManager');
+          } catch (_) {
+            // 进程可能已退出
+          }
+        });
       }
 
       // 移除标签页
       tabs.removeAt(index);
+
+      // 通知外部: 该 tab 已关闭 (用于同步 spawn 运行态等)
+      onTabClosed?.call(tab.id);
 
       // 如果关闭的是当前激活的标签页，切换到前一个标签页
       if (index == activeTabIndex.value) {
@@ -297,12 +322,16 @@ class TerminalTabManager extends GetxController {
   void onClose() {
     // 关闭所有系统终端的PTY
     for (var tab in tabs) {
-      if (tab.type == TerminalTabType.system && tab.pty != null) {
-        try {
-          tab.pty!.kill();
-          Log.i('清理终端PTY: ${tab.title}', tag: 'TerminalTabManager');
-        } catch (e) {
-          Log.e('清理终端PTY失败: $e', tag: 'TerminalTabManager');
+      if (tab.type == TerminalTabType.system) {
+        tab._ptySubscription?.cancel();
+        tab._ptySubscription = null;
+        if (tab.pty != null) {
+          try {
+            tab.pty!.kill();
+            Log.i('清理终端PTY: ${tab.title}', tag: 'TerminalTabManager');
+          } catch (e) {
+            Log.e('清理终端PTY失败: $e', tag: 'TerminalTabManager');
+          }
         }
       }
     }
