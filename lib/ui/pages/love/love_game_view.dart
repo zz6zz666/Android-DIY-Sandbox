@@ -83,6 +83,7 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    RawKeyboard.instance.addListener(_handleKey);
   }
 
   @override
@@ -155,6 +156,7 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    RawKeyboard.instance.removeListener(_handleKey);
     if (widget.keepAlive) {
       // Keep the engine alive; just stop rendering (state preserved on re-mount).
       _channel.invokeMethod('pause', {'canvasId': widget.canvasId});
@@ -163,6 +165,24 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
       _channel.invokeMethod('destroy', {'canvasId': widget.canvasId});
     }
     super.dispose();
+  }
+
+  void _sendKey(int androidKeyCode, bool down) {
+    if (!_running) return;
+    _channel.invokeMethod('key', {
+      'canvasId': widget.canvasId,
+      'keycode': androidKeyCode,
+      'down': down,
+    });
+  }
+
+  void _handleKey(RawKeyEvent event) {
+    if (!_running) return;
+    final data = event.data;
+    if (data is RawKeyEventDataAndroid) {
+      final down = event is RawKeyDownEvent;
+      _sendKey(data.keyCode, down);
+    }
   }
 
   void _sendTouch(int action, Offset local, int pointerId) {

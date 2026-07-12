@@ -1,18 +1,23 @@
 package com.diysandbox.android;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.pm.PackageManager;
 import android.graphics.PixelFormat;
 import android.media.ImageReader;
+import android.os.Build;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.Surface;
 
 import androidx.annotation.NonNull;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import org.libsdl.app.LoveHost;
 
@@ -120,6 +125,16 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
                 result.success(null);
                 break;
             }
+            case "key": {
+                Slot slot = slots[cid];
+                if (slot != null && slot.binder != null) {
+                    int keycode = argInt(call, "keycode", 0);
+                    boolean down = Boolean.TRUE.equals(call.argument("down"));
+                    callBinder(slot.binder, binder -> binder.key(keycode, down));
+                }
+                result.success(null);
+                break;
+            }
             case "startHeadless": {
                 String path = call.argument("path");
                 String bridge = call.argument("bridge");
@@ -133,6 +148,20 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
             default:
                 result.notImplemented();
         }
+    }
+
+    private ILoveCallback createRecordPermissionCallback(int cid) {
+        return new ILoveCallback.Stub() {
+            @Override
+            public void requestRecordAudioPermission() {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+                final String perm = Manifest.permission.RECORD_AUDIO;
+                if (ContextCompat.checkSelfPermission(activity, perm) == PackageManager.PERMISSION_GRANTED)
+                    return;
+                activity.runOnUiThread(() ->
+                    ActivityCompat.requestPermissions(activity, new String[]{perm}, 1000 + cid));
+            }
+        };
     }
 
     private void start(int cid, int w, int h, String path, String bridge, MethodChannel.Result result) {
@@ -164,6 +193,8 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
         final long texId = slot.producer.id();
         slot.connecting = true;
 
+        final ILoveCallback callback = createRecordPermissionCallback(cid);
+
         Intent intent = new Intent(activity, SLOT_CLASSES[cid]);
         ServiceConnection conn = new ServiceConnection() {
             @Override
@@ -171,7 +202,7 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
                 slot.connecting = false;
                 slot.binder = ILoveService.Stub.asInterface(service);
                 try {
-                    slot.binder.start(slot.producer.getSurface(), slot.width, slot.height, path, bridge);
+                    slot.binder.start(slot.producer.getSurface(), slot.width, slot.height, path, bridge, callback);
                     slot.started = true;
                 } catch (RemoteException e) {
                     Log.e(TAG, "start service call failed for canvas " + cid, e);
@@ -244,7 +275,7 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
                 slot.connecting = false;
                 slot.binder = ILoveService.Stub.asInterface(service);
                 try {
-                    slot.binder.start(slot.headlessSurface, slot.width, slot.height, path, bridge);
+                    slot.binder.start(slot.headlessSurface, slot.width, slot.height, path, bridge, createRecordPermissionCallback(cid));
                     slot.started = true;
                 } catch (RemoteException e) {
                     Log.e(TAG, "startHeadless service call failed for canvas " + cid, e);

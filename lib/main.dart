@@ -10,13 +10,21 @@ import 'dart:async';
 import 'generated/l10n.dart';
 import 'core/services/foreground_service.dart';
 import 'core/lua/script_manager.dart';
+import 'core/lua/lua_log.dart';
 import 'ui/routes/app_routes.dart';
-
-// Notice: behavior will submit Device
-
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Lua 层错误同步输出到 Lua 日志 (保留原生红屏/黄条纹渲染)
+  final _defaultOnError = FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails details) {
+    _defaultOnError?.call(details);
+    final lib = details.library ?? '';
+    // 跳过 Flutter framework 自检告警 (ListTile 背景色等), 只记录 Lua 相关错误
+    if (lib == 'Flutter framework') return;
+    LuaLog.instance.error('[$lib] ${details.exception}');
+  };
 
   // 检查并请求通知权限
   var status = await Permission.notification.status;

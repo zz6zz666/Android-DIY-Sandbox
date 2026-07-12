@@ -136,4 +136,19 @@ public class LoveHost {
         }
         SDLActivity.onNativeTouch(0, pointerId, action, x, y, pressure);
     }
+
+    /** Forward a keyboard key event from Flutter. keycode = Android KeyEvent keycode. */
+    public static void keyDown(int keycode) {
+        if (!sBooted) {
+            return;
+        }
+        SDLActivity.onNativeKeyDown(keycode);
+    }
+
+    public static void keyUp(int keycode) {
+        if (!sBooted) {
+            return;
+        }
+        SDLActivity.onNativeKeyUp(keycode);
+    }
 }

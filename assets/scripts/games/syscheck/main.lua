@@ -6,6 +6,7 @@ local results = {}
 local testIdx = 0
 local beepSrc = nil
 local saveTestFile = nil
+local lastKey = ""
 
 local function report(name, ok, detail)
   testIdx = testIdx + 1
@@ -109,6 +110,85 @@ function love.load()
     report("love.filesystem.getDirectoryItems", false, tostring(err))
   end
 
+  -- Physics: Box2D
+  ok, err = pcall(function()
+    local w = love.physics.newWorld(0, 0, true)
+    local b1 = love.physics.newBody(w, 100, 100, "dynamic")
+    local s1 = love.physics.newCircleShape(20)
+    love.physics.newFixture(b1, s1)
+    local b2 = love.physics.newBody(w, 300, 100, "static")
+    local s2 = love.physics.newRectangleShape(0, 0, 60, 20)
+    love.physics.newFixture(b2, s2)
+    w:update(0.016)
+    local x1, y1 = b1:getPosition()
+    if x1 == 0 and y1 == 0 then error("body position was (0,0)") end
+    w:destroy()
+  end)
+  report("love.physics (Box2D)", ok, ok and "world + body + fixture + step OK" or tostring(err))
+
+  -- love.math
+  ok, err = pcall(function()
+    local v = love.math.perlinNoise(0.5, 0.7)
+    if type(v) ~= "number" then error("perlinNoise() returned " .. type(v)) end
+  end)
+  report("love.math.perlinNoise", ok, ok and string.format("perlinNoise(0.5,0.7)=%.4f", love.math.perlinNoise(0.5, 0.7)) or tostring(err))
+
+  ok, err = pcall(function()
+    local rng = love.math.newRandomGenerator(os.time())
+    local a, b = rng:random(100), rng:random(100)
+    if a == b and a == b then end
+  end)
+  report("love.math.newRandomGenerator", ok, ok and "RNG created" or tostring(err))
+
+  local triCount = 0
+  ok, err = pcall(function()
+    local verts = love.math.triangulate({
+      0,0, 100,0, 50,80,
+    })
+    if verts then triCount = #verts else error("triangulate returned nil") end
+  end)
+  report("love.math.triangulate", ok, ok and string.format("%d vertices", triCount) or tostring(err))
+
+  -- Image: newImage from generated ImageData
+  ok, err = pcall(function()
+    local id = love.image.newImageData(64, 64)
+    for px = 0, 63 do
+      for py = 0, 63 do
+        local r = math.floor((px / 63) * 255)
+        local g = math.floor((py / 63) * 255)
+        id:setPixel(px, py, r, g, 128, 255)
+      end
+    end
+    local img = love.graphics.newImage(id)
+    local iw, ih = img:getDimensions()
+    if iw ~= 64 or ih ~= 64 then error("size mismatch") end
+  end)
+  report("love.graphics.newImage", ok, ok and "ImageData→Image 64x64 OK" or tostring(err))
+
+  -- Image: file-based load (write to save dir, read back)
+  ok, err = pcall(function()
+    local id = love.image.newImageData(32, 32)
+    for px = 0, 31 do
+      for py = 0, 31 do
+        id:setPixel(px, py, math.floor(px / 31 * 255), math.floor(py / 31 * 255), 128, 255)
+      end
+    end
+    local fd = id:encode("png")
+    love.filesystem.write("_test_image.png", fd)
+    if not love.filesystem.getInfo("_test_image.png") then error("file not written") end
+    local img = love.graphics.newImage("_test_image.png")
+    local iw, ih = img:getDimensions()
+    if iw ~= 32 or ih ~= 32 then error("size mismatch: " .. iw .. "x" .. ih) end
+  end)
+  report("love.graphics.newImage(file)", ok, ok and "write ImageData→PNG → load OK" or tostring(err))
+
+  -- Font: newFont from .ttf or default
+  ok, err = pcall(function()
+    local f = love.graphics.newFont(16)
+    if not f then error("font nil") end
+  end)
+  report("love.graphics.newFont", ok, ok and "size=16 created" or tostring(err))
+
   -- love.draw is tested implicitly
   report("love.draw", true)
 end
@@ -151,8 +231,11 @@ function love.draw()
 
   -- 底部提示
   love.graphics.setColor(1, 1, 0.6)
-  love.graphics.print("Tap screen to play 440Hz beep (test audio)", 12, h - 28)
-  love.graphics.print("Print log piped to app LuaLog console", 12, h - 14)
+  love.graphics.print("Tap screen to play 440Hz beep (test audio)", 12, h - 42)
+  love.graphics.print("Print log piped to app LuaLog console", 12, h - 28)
+  if #lastKey > 0 then
+    love.graphics.print("Last key: " .. lastKey, 12, h - 14)
+  end
 end
 
 local lastTap = 0
@@ -167,4 +250,9 @@ end
 
 function love.mousepressed(x, y, btn, istouch)
   if not istouch then love.touchpressed(0, x, y) end
+end
+
+function love.keypressed(key, scancode, isrepeat)
+  lastKey = key
+  report("love.keypressed", true, "key=" .. tostring(key))
 end

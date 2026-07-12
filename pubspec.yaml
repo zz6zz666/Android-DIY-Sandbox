@@ -75,6 +75,7 @@ flutter:
     - assets/scripts/music/
     - assets/scripts/sandbox/
     - assets/scripts/agent.lua
+    - assets/scripts/recorder.lua
     - assets/scripts/agent/
     - assets/scripts/agent/main.lua
     - assets/scripts/agent/sandbox
@@ -86,6 +87,11 @@ flutter:
     - assets/scripts/games/syscheck/main.lua
     - assets/scripts/games/syscheck/conf.lua
     - assets/scripts/games/audio_svc/main.lua
+    - assets/scripts/games/physics/
+    - assets/scripts/games/physics/main.lua
+    - assets/scripts/games/physics/conf.lua
+    - assets/scripts/games/multitouch/
+    - assets/scripts/games/multitouch/main.lua
 
 flutter_intl:
   enabled: true

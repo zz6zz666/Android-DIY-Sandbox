@@ -302,10 +302,80 @@ end
 
 function M.connected() return connected end
 
+-- love error/warning → bridge log (蓝屏保留)
+-- 错误时直接强制连桥并写 socket (绕过 tryConnect 的 0.5s 节流)
+do
+  local _orig_errhand = love.errhand
+  local function forceSendError(text)
+    local payload = json.encode({ type = "log", data = "[love err] " .. text }) .. "\n"
+    -- 文件兜底: 即使 TCP 失败也能被 Dart 层读到
+    pcall(function()
+      local f = io.open(love.filesystem.getSaveDirectory() .. "/_last_error.txt", "w")
+      if f then f:write(text); f:close() end
+    end)
+    if not connected then
+      -- 绕过节流, 立即尝试连接
+      local c = socket.tcp()
+      if c then
+        c:settimeout(0.1)
+        if c:connect(host, port) then
+          c:settimeout(0)
+          client = c
+          connected = true
+          recvbuf = ""
+          sendbuf = json.encode({ __hello = token }) .. "\n"
+          for _, m in ipairs(pending) do
+            sendbuf = sendbuf .. json.encode(m) .. "\n"
+          end
+          pending = {}
+        else
+          pcall(function() c:close() end)
+        end
+      end
+    end
+    if client and connected then
+      sendbuf = sendbuf .. payload
+      pumpSend()
+    end
+  end
+  love.errhand = function(msg)
+    local text = tostring(msg)
+    -- debug.traceback 确保拿到完整堆栈 (xpcall 的 msg 可能缺 traceback)
+    local full = text
+    if not text:find("stack traceback:") and not text:find("Traceback") then
+      full = debug.traceback(text, 2)
+    end
+    forceSendError(full)
+    return _orig_errhand(msg)
+  end
+  if love.errorhandler then
+    love.errorhandler = function(msg)
+      local text = tostring(msg)
+      local full = text
+      if not text:find("stack traceback:") and not text:find("Traceback") then
+        full = debug.traceback(text, 2)
+      end
+      forceSendError(full)
+      return _orig_errhand(msg)
+    end
+  end
+  -- LOVE 12 deprecated 警告走 handlers.warning → 截获进 log 且不渲染
+  if love.handlers then
+    love.handlers["warning"] = function(msg)
+      M.emit("log", "[love warn] " .. tostring(msg))
+    end
+  end
+end
+
+-- 关闭 LOVE 引擎的 deprecated 警告输出 (C++ printf + 屏幕渲染)。
+-- 用户游戏若用了旧 API, 不会在画布底部刷小字, 正常进 logcat。
+pcall(love.setDeprecationOutput, false)
+
 -- 覆盖全局 print(), 使游戏 print() 输出同时走桥发送到 app 日志。
 -- emit() 内置未连接时缓存机制, 连上后自动补发, 确保启动期日志不丢。
+-- 识别 deprecated 警告并加 [love warn] 前缀, 使 Dart 侧按 WARN 级别入库。
 do
-  local _print = print
+  local _orig_print = print
   print = function(...)
     local parts = {}
     for i = 1, select("#", ...) do
@@ -313,8 +383,12 @@ do
       parts[i] = tostring(v)
     end
     local msg = table.concat(parts, "\t")
-    _print(msg)
-    M.emit("log", msg)
+    _orig_print(msg)
+    if msg:find("deprecated") or msg:find("Using deprecated") then
+      M.emit("log", "[love warn] " .. msg)
+    else
+      M.emit("log", msg)
+    end
   end
 end
 

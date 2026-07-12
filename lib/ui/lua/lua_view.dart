@@ -488,6 +488,15 @@ class LuaRenderer {
   }
 
   Widget build(BuildContext context, Object? node) {
+    if (node is LuaFunctionRef) {
+      final result = node.call();
+      if (result is! List) return build(context, result);
+      if (result.isEmpty) return const SizedBox.shrink();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [for (final c in result) build(context, c)],
+      );
+    }
     if (node is List) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

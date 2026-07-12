@@ -24,6 +24,7 @@ nav.tabs({
   { title = "文件",  icon = "folder_open_outlined",    page = "files" },
   { title = "游戏",  icon = "sports_esports_outlined", page = "games" },
   { title = "音乐",  icon = "music_note",              page = "music" },
+  { title = "录音",  icon = "mic",                     page = "recorder" },
   { title = "Web",   icon = "language",                page = webview() },
   { title = "终端",  icon = "terminal",                page = terminal() },
 })
@@ -1054,6 +1055,30 @@ app.page("games", function()
           }, { fill = true, gap = 10 })
         end)(),
       },
+      {
+        title = "多指", icon = "touch_app",
+        content = column({
+          card({ text("多点触摸测试", { weight = "bold" }),
+            text("多个手指同时触摸, 每个手指显示不同颜色的圆圈。", { size = 12, color = "grey" }) }),
+          expanded(love{ id = 6, game = SCRIPTS .. "/games/multitouch", keepalive = false }),
+        }, { fill = true, gap = 10 }),
+      },
+      {
+        title = "物理", icon = "science",
+        content = column({
+          card({ text("Box2D 物理引擎测试", { weight = "bold" }),
+            text("点击屏幕生成小球, 受重力下落, 相互碰撞。", { size = 12, color = "grey" }) }),
+          expanded(love{ id = 4, game = SCRIPTS .. "/games/physics", keepalive = false }),
+        }, { fill = true, gap = 10 }),
+      },
+      {
+        title = "诊断", icon = "bug_report",
+        content = column({
+          card({ text("引擎能力全面验证", { weight = "bold" }),
+            text("测试图形/音频/文件系统/物理/数学/图像/字体等模块。", { size = 12, color = "grey" }) }),
+          expanded(love{ id = 5, game = SCRIPTS .. "/games/syscheck", keepalive = false }),
+        }, { fill = true, gap = 10 }),
+      },
     },
   })
 end)
@@ -1062,3 +1087,8 @@ end)
 -- 音乐播放器
 -- ============================================================
 require("music.main")
+
+-- ============================================================
+-- 录音机
+-- ============================================================
+require("recorder")

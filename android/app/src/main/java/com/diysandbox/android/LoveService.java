@@ -39,6 +39,8 @@ import java.util.Map;
 public abstract class LoveService extends Service {
     private static final String TAG = "LoveService";
 
+    private ILoveCallback callback;
+
     private static final String[] LOVE_LIBS = {
         "c++_shared", "SDL3", "oboe", "openal", "luajit-love", "liblove", "love"
     };
@@ -50,7 +52,8 @@ public abstract class LoveService extends Service {
 
     private final ILoveService.Stub binder = new ILoveService.Stub() {
         @Override
-        public void start(Surface surface, int width, int height, String gamePath, String bridgeArg) {
+        public void start(Surface surface, int width, int height, String gamePath, String bridgeArg, ILoveCallback cb) {
+            callback = cb;
             final String[] args;
             if (gamePath == null) {
                 args = new String[0];
@@ -81,6 +84,11 @@ public abstract class LoveService extends Service {
         @Override
         public void touch(int id, int action, float x, float y, float p) {
             LoveHost.touch(id, action, x, y, p);
+        }
+
+        @Override
+        public void key(int keycode, boolean down) {
+            if (down) LoveHost.keyDown(keycode); else LoveHost.keyUp(keycode);
         }
 
         @Override
@@ -156,8 +164,15 @@ public abstract class LoveService extends Service {
 
     @Keep
     public void requestRecordAudioPermission() {
-        // Cannot request runtime permissions from a Service (no Activity).
-        Log.w(TAG, "requestRecordAudioPermission ignored (no Activity in service process)");
+        if (callback != null) {
+            try {
+                callback.requestRecordAudioPermission();
+            } catch (android.os.RemoteException e) {
+                Log.w(TAG, "requestRecordAudioPermission callback failed", e);
+            }
+        } else {
+            Log.w(TAG, "requestRecordAudioPermission ignored (no callback set)");
+        }
     }
 
     @Keep
