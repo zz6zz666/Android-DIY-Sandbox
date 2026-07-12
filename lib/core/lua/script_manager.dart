@@ -632,6 +632,12 @@ class ScriptManager {
             if (t is Map) Map<String, dynamic>.from(t),
         ];
       }
+      // 兜底: 当脚本定义的导航栏不包含"主页"时, 强制将主页插入为第一项,
+      // 以保证顶栏的救命按钮(设置等)始终可访问。
+      if (_navTabs.isNotEmpty && !_navTabs.any(_isNavHome)) {
+        LuaLog.instance.warn('Lua 脚本未定义主页导航项, 已自动插入兜底主页');
+        _navTabs.insert(0, {'title': '主页', 'icon': 'home', 'page': 'home'});
+      }
       return null;
     });
     // 注册主页顶栏自定义按钮列表 (渲染在设置按钮左侧)。
@@ -1649,6 +1655,14 @@ class ScriptManager {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 判断导航项是否为 "主页" (与 main_page.dart 中 _isHome 逻辑一致)。
+  static bool _isNavHome(Map<String, dynamic> tab) {
+    final page = tab['page'];
+    if (page is String) return page == 'home';
+    if (page is Map) return '${page['type']}' == 'home' || '${page['page']}' == 'home';
+    return false;
   }
 
   /// 切到脚本里第一个「终端」类型的导航页 (供 spawn 自动聚焦, 不依赖硬编码索引)。
