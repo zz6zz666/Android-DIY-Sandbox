@@ -88,5 +88,9 @@
         <service android:name="com.diysandbox.android.LoveService1" android:process=":love1" android:exported="false" android:stopWithTask="false" />
         <service android:name="com.diysandbox.android.LoveService2" android:process=":love2" android:exported="false" android:stopWithTask="false" />
         <service android:name="com.diysandbox.android.LoveService3" android:process=":love3" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.diysandbox.android.LoveService4" android:process=":love4" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.diysandbox.android.LoveService5" android:process=":love5" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.diysandbox.android.LoveService6" android:process=":love6" android:exported="false" android:stopWithTask="false" />
+        <service android:name="com.diysandbox.android.LoveService7" android:process=":love7" android:exported="false" android:stopWithTask="false" />
     </application>
 </manifest>

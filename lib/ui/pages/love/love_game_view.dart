@@ -165,7 +165,7 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
     super.dispose();
   }
 
-  void _sendTouch(int action, Offset local) {
+  void _sendTouch(int action, Offset local, int pointerId) {
     if (!_running) return;
     final double px = (local.dx / _logW).clamp(0.0, 1.0);
     final double py = (local.dy / _logH).clamp(0.0, 1.0);
@@ -185,7 +185,7 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
     }
     _channel.invokeMethod('touch', {
       'canvasId': widget.canvasId,
-      'id': 0,
+      'id': pointerId,
       'action': action,
       'x': nx,
       'y': ny,
@@ -225,10 +225,10 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
         }
         return Listener(
           behavior: HitTestBehavior.opaque,
-          onPointerDown: (e) => _sendTouch(0, e.localPosition), // ACTION_DOWN
-          onPointerMove: (e) => _sendTouch(2, e.localPosition), // ACTION_MOVE
-          onPointerUp: (e) => _sendTouch(1, e.localPosition), // ACTION_UP
-          onPointerCancel: (e) => _sendTouch(3, e.localPosition), // ACTION_CANCEL
+          onPointerDown: (e) => _sendTouch(0, e.localPosition, e.pointer), // ACTION_DOWN
+          onPointerMove: (e) => _sendTouch(2, e.localPosition, e.pointer), // ACTION_MOVE
+          onPointerUp: (e) => _sendTouch(1, e.localPosition, e.pointer), // ACTION_UP
+          onPointerCancel: (e) => _sendTouch(3, e.localPosition, e.pointer), // ACTION_CANCEL
           child: tex,
         );
       },

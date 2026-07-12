@@ -68,8 +68,11 @@ flutter:
     - assets/scripts/games/demo/
     - assets/scripts/games/runner/
     - assets/scripts/games/bounce/
+    - assets/scripts/games/syscheck/
+    - assets/scripts/games/audio_svc/
     - assets/scripts/widgets/
     - assets/scripts/apps/
+    - assets/scripts/music/
     - assets/scripts/agent.lua
     - assets/scripts/agent/
     - assets/scripts/agent/main.lua
@@ -79,6 +82,9 @@ flutter:
     - assets/scripts/games/demo/main.lua
     - assets/scripts/games/runner/main.lua
     - assets/scripts/games/bounce/main.lua
+    - assets/scripts/games/syscheck/main.lua
+    - assets/scripts/games/syscheck/conf.lua
+    - assets/scripts/games/audio_svc/main.lua
 
 flutter_intl:
   enabled: true

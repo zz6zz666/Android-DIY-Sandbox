@@ -76,8 +76,6 @@ android {
             }
         }
         debug {
-            applicationIdSuffix ".debug"
-            resValue "string", "app_name", "DIY Sandbox"
             signingConfig hasKeystoreFile ? signingConfigs.release : signingConfigs.debug
             minifyEnabled false
             shrinkResources false

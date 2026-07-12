@@ -5,6 +5,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.graphics.PixelFormat;
+import android.media.ImageReader;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.Log;
@@ -28,9 +30,10 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
     private static final String TAG = "LoveMultiManager";
     public static final String CHANNEL = "love_texture_channel";
 
-    private static final int MAX_SLOTS = 4;
+    private static final int MAX_SLOTS = 8;
     private static final Class<?>[] SLOT_CLASSES = {
-        LoveService0.class, LoveService1.class, LoveService2.class, LoveService3.class
+        LoveService0.class, LoveService1.class, LoveService2.class, LoveService3.class,
+        LoveService4.class, LoveService5.class, LoveService6.class, LoveService7.class
     };
 
     private final Activity activity;
@@ -44,6 +47,9 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
         int width, height;
         boolean started;
         boolean connecting;
+        boolean headless;
+        ImageReader headlessReader;
+        Surface headlessSurface;
     }
 
     public LoveMultiManager(@NonNull Activity activity, @NonNull TextureRegistry textureRegistry) {
@@ -112,6 +118,16 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
                     callBinder(slot.binder, binder -> binder.touch(pid, action, x, y, p));
                 }
                 result.success(null);
+                break;
+            }
+            case "startHeadless": {
+                String path = call.argument("path");
+                String bridge = call.argument("bridge");
+                startHeadless(cid, path, bridge, result);
+                break;
+            }
+            case "destroyHeadless": {
+                destroyHeadless(cid, result);
                 break;
             }
             default:
@@ -196,6 +212,79 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    /** 启动 headless love 进程 (无渲染 Texture, 纯音频等后台用途)。 */
+    private void startHeadless(int cid, String path, String bridge, MethodChannel.Result result) {
+        if (slots[cid] != null) {
+            final Slot slot = slots[cid];
+            if (slot.producer != null) {
+                result.error("SLOT_OCCUPIED", "canvas " + cid + " 已被可视画布占用", null);
+                return;
+            }
+            if (slot.binder != null && slot.started) {
+                result.success(null);
+                return;
+            }
+        }
+
+        final Slot slot = new Slot();
+        slot.headless = true;
+        slot.width = 32;
+        slot.height = 32;
+        slot.headlessReader = ImageReader.newInstance(32, 32, PixelFormat.RGBA_8888, 2);
+        slot.headlessSurface = slot.headlessReader.getSurface();
+        slots[cid] = slot;
+        slot.connecting = true;
+
+        Intent intent = new Intent(activity, SLOT_CLASSES[cid]);
+        ServiceConnection conn = new ServiceConnection() {
+            @Override
+            public void onServiceConnected(ComponentName name, IBinder service) {
+                slot.connecting = false;
+                slot.binder = ILoveService.Stub.asInterface(service);
+                try {
+                    slot.binder.start(slot.headlessSurface, slot.width, slot.height, path, bridge);
+                    slot.started = true;
+                } catch (RemoteException e) {
+                    Log.e(TAG, "startHeadless service call failed for canvas " + cid, e);
+                }
+            }
+
+            @Override
+            public void onServiceDisconnected(ComponentName name) {
+                slot.binder = null;
+            }
+        };
+        slot.conn = conn;
+        activity.bindService(intent, conn, Context.BIND_AUTO_CREATE);
+
+        result.success(null);
+    }
+
+    private void destroyHeadless(int cid, MethodChannel.Result result) {
+        Slot slot = slots[cid];
+        if (slot == null || !slot.headless) {
+            result.success(null);
+            return;
+        }
+        slots[cid] = null;
+        if (slot.binder != null) {
+            callBinder(slot.binder, ILoveService::stop);
+        }
+        if (slot.conn != null) {
+            try {
+                activity.unbindService(slot.conn);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (slot.headlessSurface != null) {
+            slot.headlessSurface.release();
+        }
+        if (slot.headlessReader != null) {
+            slot.headlessReader.close();
+        }
+        result.success(null);
     }
 
     private void callBinder(ILoveService binder, BinderCall block) {

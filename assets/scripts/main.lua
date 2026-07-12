@@ -15,7 +15,7 @@
 local agent = require("agent")   -- opencode 引擎: 安装 / 启动 / WebUI 托管
 
 -- 导航页索引 (host.nav.go 用)
-local TAB = { home = 0, gallery = 1, network = 2, files = 3, games = 4, webui = 5, terminal = 6 }
+local TAB = { home = 0, gallery = 1, network = 2, files = 3, games = 4, music = 5, webui = 6, terminal = 7 }
 
 nav.tabs({
   { title = "主页",  icon = "home_outlined",          page = "home" },
@@ -23,7 +23,8 @@ nav.tabs({
   { title = "网络",  icon = "cloud_outlined",          page = "network" },
   { title = "文件",  icon = "folder_open_outlined",    page = "files" },
   { title = "游戏",  icon = "sports_esports_outlined", page = "games" },
-  { title = "Web", icon = "language",                page = webview() },
+  { title = "音乐",  icon = "music_note",              page = "music" },
+  { title = "Web",   icon = "language",                page = webview() },
   { title = "终端",  icon = "terminal",                page = terminal() },
 })
 
@@ -1056,3 +1057,8 @@ app.page("games", function()
     },
   })
 end)
+
+-- ============================================================
+-- 音乐播放器
+-- ============================================================
+require("music.main")

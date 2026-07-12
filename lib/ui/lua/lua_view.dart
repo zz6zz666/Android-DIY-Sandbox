@@ -681,7 +681,9 @@ class LuaRenderer {
       case 'love':
         final gp = node['game'];
         final canvasId = (LuaStyle._num(node['id']) ?? 0).toInt();
-        final gamePath = gp == null ? null : '$gp';
+        final rawPath = gp == null ? null : '$gp';
+        final gamePath = rawPath == null ? null
+            : LoveBridge.resolveGamePath(rawPath, ScriptManager.instance.scriptsDir);
         final onEvent = node['onEvent'];
         final freeze = node['freeze'] == true;
         final rot = '${node['rotate'] ?? ''}'.toLowerCase();

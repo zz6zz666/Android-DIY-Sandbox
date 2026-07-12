@@ -33,7 +33,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '5';
+  static const String _defaultScriptsVersion = '7';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -689,6 +689,68 @@ class ScriptManager {
     e.registerHandler('love_on', (a) {
       final id = a.isNotEmpty && a[0] is int ? a[0] as int : 0;
       LoveBridge.instance.setHandler(id, cbOf(a, 1));
+      return null;
+    });
+    // headless audio: 不带渲染画布的 love 音频服务。
+    e.registerHandler('audio_ensure', (a) {
+      LoveAudioManager.instance.ensureStarted(scriptsDir);
+      return null;
+    });
+    e.registerHandler('audio_play', (a) {
+      final path = a.isNotEmpty ? '${a[0]}' : '';
+      final opts = a.length > 1 && a[1] is Map ? a[1] as Map : <String, dynamic>{};
+      LoveAudioManager.instance.play(path,
+        channel: (opts['channel'] as String?) ?? 'default',
+        volume: (opts['volume'] as num?)?.toDouble() ?? 1.0,
+        loop: opts['loop'] == true,
+      );
+      return null;
+    });
+    e.registerHandler('audio_pause', (a) {
+      final channel = a.isNotEmpty ? '${a[0]}' : 'default';
+      LoveAudioManager.instance.pause(channel);
+      return null;
+    });
+    e.registerHandler('audio_resume', (a) {
+      final channel = a.isNotEmpty ? '${a[0]}' : 'default';
+      LoveAudioManager.instance.resume(channel);
+      return null;
+    });
+    e.registerHandler('audio_stop', (a) {
+      final channel = a.isNotEmpty ? '${a[0]}' : 'default';
+      LoveAudioManager.instance.stop(channel);
+      return null;
+    });
+    e.registerHandler('audio_seek', (a) {
+      final pos = a.isNotEmpty ? (a[0] is num ? (a[0] as num).toDouble() : 0.0) : 0.0;
+      final channel = a.length > 1 ? '${a[1]}' : 'default';
+      LoveAudioManager.instance.seek(pos, channel);
+      return null;
+    });
+    e.registerHandler('audio_set_volume', (a) {
+      final v = a.isNotEmpty ? (a[0] is num ? (a[0] as num).toDouble() : 1.0) : 1.0;
+      final channel = a.length > 1 ? '${a[1]}' : 'default';
+      LoveAudioManager.instance.setVolume(v, channel);
+      return null;
+    });
+    e.registerHandler('audio_set_loop', (a) {
+      final loop = a.isNotEmpty && a[0] == true;
+      final channel = a.length > 1 ? '${a[1]}' : 'default';
+      LoveAudioManager.instance.setLoop(loop, channel);
+      return null;
+    });
+    e.registerHandler('audio_state', (a) {
+      final channel = a.isNotEmpty ? '${a[0]}' : 'default';
+      return LoveAudioManager.instance.getState(channel);
+    });
+    e.registerHandler('audio_on_event', (a) {
+      final fn = cbOf(a, 0);
+      if (fn == null) return -1;
+      return LoveAudioManager.instance.addListener(fn);
+    });
+    e.registerHandler('audio_off_event', (a) {
+      final id = a.isNotEmpty && a[0] is int ? a[0] as int : -1;
+      LoveAudioManager.instance.removeListener(id);
       return null;
     });
     // 持久化存储 (原生 SQLite 通道)。

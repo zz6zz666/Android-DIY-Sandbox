@@ -302,6 +302,22 @@ end
 
 function M.connected() return connected end
 
+-- 覆盖全局 print(), 使游戏 print() 输出同时走桥发送到 app 日志。
+-- emit() 内置未连接时缓存机制, 连上后自动补发, 确保启动期日志不丢。
+do
+  local _print = print
+  print = function(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+      local v = select(i, ...)
+      parts[i] = tostring(v)
+    end
+    local msg = table.concat(parts, "\t")
+    _print(msg)
+    M.emit("log", msg)
+  end
+end
+
 -- 自动每帧收发:包装 love.run(11.x 返回主循环函数)。
 -- 若启用 freeze(挂起冻结): 在游戏定义好 love.update 后包裹它, 钳制单帧 dt 上限,
 -- 这样从挂起恢复时那个"补偿真实流逝时间"的巨大 dt 会被限制, 游戏从被挂起的

@@ -302,6 +302,34 @@ function love.on(id, fn)
   return __host_call("love_on", id or 0, fn)
 end
 
+  -- ==================== 音频 (headless love 进程) ====================
+  -- 后台音频引擎, 支持多声道并行播放 (bgm / sfx / default 等)。
+  --
+  -- 事件回调: host.audio_on_event(function(channel, type, data) ... end)
+  --   type: "started" / "paused" / "resumed" / "stopped" / "ended" / "seeked" / "state" / "error"
+  --   data: 具体数据表 (state 时为 {playing, position, duration})
+  --
+  -- 示例:
+  --   host.audio_ensure()
+  --   host.audio_play("/sdcard/bgm.mp3", {channel="bgm", loop=true})
+  --   host.audio_play("/sdcard/sfx.wav", {channel="sfx", volume=0.8})
+  --   local id = host.audio_on_event(function(ch, ty, d) print(ch, ty) end)
+  --   host.audio_off_event(id)
+  --
+  function host.audio_ensure() return __host_call("audio_ensure") end
+  function host.audio_play(path, opts) return __host_call("audio_play", path, opts or {}) end
+  function host.audio_pause(channel) return __host_call("audio_pause", channel) end
+  function host.audio_resume(channel) return __host_call("audio_resume", channel) end
+  function host.audio_stop(channel) return __host_call("audio_stop", channel) end
+  function host.audio_seek(pos, channel) return __host_call("audio_seek", pos, channel) end
+  function host.audio_set_volume(v, channel) return __host_call("audio_set_volume", v, channel) end
+  function host.audio_set_loop(loop, channel) return __host_call("audio_set_loop", loop, channel) end
+  -- 返回最近一次状态快照 { playing, position, duration, channel } (若未播放则 playing=false)。
+  function host.audio_state(channel) return __host_call("audio_state", channel) end
+  -- 注册事件回调; 返回 listener_id 供 audio_off_event 注销。
+  function host.audio_on_event(fn) return __host_call("audio_on_event", fn) end
+  function host.audio_off_event(id) return __host_call("audio_off_event", id) end
+
 -- ==================== 持久化存储 (原生 SQLite) ====================
 -- store.open(name) 打开一个数据库(每个 name 一个独立文件, app 重启后数据保留)。
 -- 返回的对象提供三个原生方法, 结构与查询完全用标准 SQL 表达, 不设任何限制:
