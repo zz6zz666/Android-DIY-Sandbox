@@ -62,7 +62,14 @@ class LoveBridge {
   /// app → 游戏:发送一条消息(Map)。游戏未连接时静默丢弃。
   void send(int canvasId, Object? msg) {
     final c = _canvases[canvasId];
-    if (c == null || c.client == null) return;
+    if (c == null) {
+      debugPrint('[LoveBridge] send dropped (no canvas $canvasId): $msg');
+      return;
+    }
+    if (c.client == null) {
+      debugPrint('[LoveBridge] send dropped (no client $canvasId): $msg');
+      return;
+    }
     try {
       c.client!.write('${jsonEncode(msg)}\n');
     } catch (e) {
@@ -183,8 +190,14 @@ class LoveBridge {
 
   void _deliver(_Canvas c, Object? msg) {
     if (msg is Map && msg['type'] == 'log') {
-      final d = msg['data'];
-      LuaLog.instance.info('[love canvas${c.id}] ${d ?? msg}');
+      final d = msg['data']?.toString() ?? '';
+      if (d.startsWith('[love err]')) {
+        LuaLog.instance.error('[love canvas${c.id}] $d');
+      } else if (d.startsWith('[love warn]')) {
+        LuaLog.instance.warn('[love canvas${c.id}] $d');
+      } else {
+        LuaLog.instance.info('[love canvas${c.id}] ${d.isNotEmpty ? d : msg}');
+      }
     }
     c.dartHandler?.call(msg);
     final cb = c.onEvent;
@@ -196,8 +209,6 @@ class LoveBridge {
     }
   }
 
-  final Set<String> _dropped = {};
-
   /// 通信桥游戏侧源码 (love_host.lua)。由 ScriptManager 在初始化时从 asset 载入一次。
   /// 它对用户完全不可见: 写入 love 的 save 目录 (而非用户可见的脚本/游戏目录),
   /// love 的 require 会在 save 目录搜到它, 游戏 `require("love_host")` 即可用。
@@ -207,18 +218,13 @@ class LoveBridge {
     try {
       final src = bridgeSource;
       if (src == null || src.isEmpty) return;
-      // love 无 conf.lua 时, identity 默认取游戏目录名; save 目录为
-      // <configRoot>/save/love/<identity>。configRoot 为 scriptsDir 的上级 (files 目录)。
       final identity = gamePath.split('/').where((s) => s.isNotEmpty).last;
       final configRoot = Directory(scriptsDir).parent.path;
       final saveDir = Directory('$configRoot/save/love/$identity');
-      if (_dropped.contains(identity) &&
-          File('${saveDir.path}/love_host.lua').existsSync()) {
-        return;
-      }
       saveDir.createSync(recursive: true);
-      File('${saveDir.path}/love_host.lua').writeAsStringSync(src);
-      _dropped.add(identity);
+      final dest = File('${saveDir.path}/love_host.lua');
+      // 总是重新写入 (love_host.lua 随 App 版本更新, 旧版可能缺少修复)
+      dest.writeAsStringSync(src);
     } catch (e) {
       LuaLog.instance.warn('注入 love_host.lua 失败: $e');
     }
@@ -322,8 +328,8 @@ class LoveAudioManager {
     _scriptsDir = scriptsDir;
     if (_started) return;
 
-    // 清理旧的 temp_audio 文件 (保留 < 1h 内的)
-    _cleanupOldTempFiles();
+    // Limit cache on startup (keep most recent 50 files)
+    _cleanupTempCache(50);
 
     final gamePath = '$scriptsDir/games/audio_svc';
     final bridge = LoveBridge.instance;
@@ -385,6 +391,21 @@ class LoveAudioManager {
   void setVolume(double v, String channel) => _send('set_volume', {'channel': channel, 'volume': v});
   void setLoop(bool loop, String channel) => _send('set_loop', {'channel': channel, 'loop': loop});
 
+  // --- 录音 ---
+
+  void recordStart(String channel, {int rate = 44100, int bits = 16, int chans = 1}) {
+    debugPrint('[LoveAudioManager] recordStart: channel=$channel rate=$rate bits=$bits chans=$chans started=$_started');
+    _send('record_start', {'channel': channel, 'rate': rate, 'bits': bits, 'chans': chans});
+  }
+
+  void recordStop(String channel) => _send('record_stop', {'channel': channel});
+  void recordPause(String channel) => _send('record_pause', {'channel': channel});
+  void recordResume(String channel) => _send('record_resume', {'channel': channel});
+  void recordDiscard(String channel) => _send('record_discard', {'channel': channel});
+  void recordPlay(String channel, {double volume = 1.0, double amp = 16.0}) {
+    _send('record_play', {'channel': channel, 'volume': volume, 'amp': amp});
+  }
+
   Map<String, dynamic> getState(String channel) {
     final s = _channelStates[channel] ?? _lastState;
     return {'channel': channel, 'playing': s['playing'] ?? false, 'position': s['position'] ?? 0, 'duration': s['duration'] ?? 0};
@@ -403,6 +424,7 @@ class LoveAudioManager {
       final gameDir = '$_scriptsDir/games/audio_svc';
       final cacheDir = Directory('$gameDir/temp_audio');
       if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
+      _cleanupTempCache(30);
       final name = path.split('/').last;
       final dest = File('${cacheDir.path}/$name');
       if (!dest.existsSync()) {
@@ -432,6 +454,7 @@ class LoveAudioManager {
       final gameDir = '$_scriptsDir/games/audio_svc';
       final cacheDir = Directory('$gameDir/temp_audio');
       if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
+      _cleanupTempCache(30);  // limit HTTP cache before download
       final raw = url.split('?').first.split('/').last;
       final name = raw.isNotEmpty ? raw : 'stream';
       final dest = File('${cacheDir.path}/http_$name');
@@ -495,21 +518,20 @@ class LoveAudioManager {
     }
   }
 
-  void _cleanupOldTempFiles() {
+  void _cleanupTempCache(int maxFiles) {
     try {
       final cacheDir = Directory('$_scriptsDir/games/audio_svc/temp_audio');
       if (!cacheDir.existsSync()) return;
-      final cutoff = DateTime.now().subtract(const Duration(hours: 1));
-      for (final entry in cacheDir.listSync()) {
-        if (entry is File) {
-          try {
-            final mod = entry.lastModifiedSync();
-            if (mod.isBefore(cutoff)) entry.deleteSync();
-          } catch (_) {}
-        }
+      final files = cacheDir.listSync().whereType<File>().toList();
+      if (files.length <= maxFiles) return;
+      files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+      for (int i = maxFiles; i < files.length; i++) {
+        try { files[i].deleteSync(); } catch (_) {}
       }
     } catch (_) {}
   }
+
+  void _cleanupOldTempFiles() {}
 
   // --- 生命周期 ---
 
@@ -521,6 +543,7 @@ class LoveAudioManager {
     }
     _listeners.clear();
     LoveBridge.instance.setDartHandler(audioCanvasId, null);
+    _cleanupTempCache(10);  // trim cache to 10 files on exit
     try {
       await _channel.invokeMethod('destroyHeadless', {'canvasId': audioCanvasId});
     } catch (e) {
@@ -534,4 +557,63 @@ class LoveAudioManager {
 class _PendingCmd {
   final void Function() execute;
   _PendingCmd(this.execute);
+}
+
+/// 系统媒体会话桥 — 将音频播放注册到 Android 系统通知栏媒体控件。
+///
+/// 由 Lua 侧 `host.media_session_init/update/release` 调用，
+/// 通过 MethodChannel 桥接到 Java 侧的 MediaSessionCompat。
+///
+/// 媒体按键回调 (play/pause/skip/seek) 由 Java → Dart 反向通知，
+/// 转发到已注册的 Lua 回调。
+class MediaSessionBridge {
+  MediaSessionBridge._() {
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onMediaButton') {
+        final action = call.arguments is Map
+            ? (call.arguments as Map)['action']?.toString()
+            : null;
+        final position = call.arguments is Map
+            ? (call.arguments as Map)['position']
+            : null;
+        _onButton?.call([action, position]);
+      }
+    });
+  }
+  static final MediaSessionBridge instance = MediaSessionBridge._();
+
+  static const _channel = MethodChannel('media_session');
+  LuaFunctionRef? _onButton;
+
+  void init() => _channel.invokeMethod('init');
+
+  void updateMetadata({
+    String? title,
+    String? artist,
+    String? album,
+    int duration = 0,
+  }) {
+    _channel.invokeMethod('updateMetadata', {
+      'title': title ?? '',
+      'artist': artist ?? '',
+      'album': album ?? '',
+      'duration': duration,
+    });
+  }
+
+  void updatePlaybackState({
+    required String state,
+    int position = 0,
+  }) {
+    _channel.invokeMethod('updatePlaybackState', {
+      'state': state,
+      'position': position,
+    });
+  }
+
+  void release() => _channel.invokeMethod('release');
+
+  void setButtonHandler(LuaFunctionRef? fn) {
+    _onButton = fn;
+  }
 }

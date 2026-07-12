@@ -48,17 +48,17 @@ app.page("music", function(ctx)
     onSelect = function(i) t.set(i) end,
     items = {
       {
-        title = "本地音乐", icon = "music_note",
-        content = lifecycle({
-          child     = p.build(ctx),
-          onDispose = function() p.dispose() end,
-        }),
-      },
-      {
         title = "在线搜索", icon = "search",
         content = lifecycle({
           child     = o.build(ctx),
           onDispose = function() o.dispose() end,
+        }),
+      },
+      {
+        title = "本地音乐", icon = "music_note",
+        content = lifecycle({
+          child     = p.build(ctx),
+          onDispose = function() p.dispose() end,
         }),
       },
       {

@@ -660,17 +660,72 @@ lifecycle{
 
 ---
 
-## 十二、Agent 命令行工具集(agent/sandbox)
+## 十二、日志系统与 Agent 开发工具
+
+### 日志架构
+
+App 内置**多层日志捕获管道**,确保脚本错误、引擎 crash、deprecated 警告全部可追溯:
+
+```
+Lua 脚本 print() / host.log|warn|error(msg)
+LOVE 引擎 love.errhand / errorhandler / handlers.warning
+      │
+      ▼  TCP 桥 (加密, 启动期自动缓冲, 连上后补发)
+      │      ↓ 文件兜底 _last_error.txt (TCP 未建时防丢)
+Dart LuaLog 实例
+      │
+      ├──▶ App 内「Lua 日志」控制台 (设置页顶栏, 实时追加)
+      │
+      ├──▶ agent/lua.log 文件镜像 (App 启动/重载时重置)
+      │         └── bash agent/sandbox log          # 查看最近 N 行
+      │         └── bash agent/sandbox log -f       # 持续跟随 (tail -f)
+      │
+      └──▶ FlutterError.onError → logcat (过滤框架噪声, 仅留真正错误)
+```
+
+#### host.log / host.warn / host.error(msg)
+
+脚本内写日志用三个级别:
+
+```lua
+host.log("用户点击了按钮")
+host.warn("配置文件缺失, 使用默认值")
+host.error("接口调用失败: " .. err)
+```
+
+| 函数        | 级别  | 日志前缀  |
+| ----------- | ----- | --------- |
+| `host.log`  | INFO  | 无        |
+| `host.warn` | WARN  | `[WARN]`  |
+| `host.error`| ERROR | `[ERROR]` |
+
+#### print() 重定向
+
+`print(...)` 已重定向到日志系统,自动以 INFO 级别入库。LOVE 引擎的 deprecated API
+警告(`Using deprecated …`)会被识别并标记为 `[love warn]` 级别。
+
+#### LOVE 引擎错误捕获
+
+`love_host.lua` 在游戏进程启动时自动劫持 `love.errhand` / `love.errorhandler`,
+**带完整 Lua stack traceback** 发送到日志系统,同时:
+- 保留原错误蓝屏 (`_orig_errhand(msg)`) — 画布上仍显示故障信息
+- 写 `_last_error.txt` 文件兜底 — 即使 TCP 未建也能在下一轮被读到
+- 错误时绕过连接节流 (0.5s) 立即强制连桥,确保不丢错误
+
+LOVE 12 的 deprecated 警告走 `love.handlers.warning` → `[love warn]` 前缀入库,
+`love.setDeprecationOutput(false)` 关闭 C++ 层的 printf + 屏幕渲染。
+
+### Agent 命令行工具 (agent/sandbox)
 
 Agent 在容器里改完 `.lua` 后,脚本**不会自动生效**(App 不做监视/轮询)。统一工具 `agent/sandbox`
-通过本机回环控制通道与宿主 App 通信,涵盖开发调试常用操作:
+通过本机回环 TCP 控制通道与宿主 App 通信:
 
 ```sh
 bash agent/sandbox reload          # 重载全部脚本 (等同主页刷新键, 带快照保护; 失败自动回退上一版)
 bash agent/sandbox ping            # 探活 (确认 App 在运行)
 bash agent/sandbox run <file.lua>  # 在隔离引擎里试跑一个脚本 (语法/逻辑快速自测, 不影响在跑的 UI)
 bash agent/sandbox log [N]         # 查看最近 N 行 Lua 运行日志 (默认 100)
-bash agent/sandbox log -f [N]      # 持续跟随 Lua 运行日志
+bash agent/sandbox log -f [N]      # 持续跟随 Lua 运行日志 (tail -f 模式)
 ```
 
 - **run**:独立 `lua_State` 执行目标文件,只挂少量安全**只读**(路径/`read_file`/`list_dir`/`get`…)
@@ -678,13 +733,16 @@ bash agent/sandbox log -f [N]      # 持续跟随 Lua 运行日志
   `host.spawn`/`host.http`/`host.dialog`/`love`…)一律视作 no-op,**不会污染正在运行的 UI**。
   捕获 `print` / `host.log|warn|error` / `host.toast` 输出与加载/运行错误后回传;若脚本 `return` 的
   模块表含 `build`,还会试运行一次 `build()` 以暴露运行期错误。适合"改完先 run 一下看能不能正常加载"。
-- **log**:读取 `agent/lua.log`——它是 App 内「Lua 日志」控制台的文件镜像(`host.log/warn/error`、
-  `print`、脚本加载/回调运行错误都汇聚于此),每次 App 启动/重载会重置。容器内即可 `tail` 查看。
+- **log**:读取 `agent/lua.log`—— App 内「Lua 日志」控制台的文件镜像。`host.log/warn/error`、
+  `print()`、脚本加载错误、回调运行错误、LOVE 引擎 crash/deprecated 警告全部汇聚于此,
+  **每次 App 启动/重载会重置**。容器内即可 `tail` 查看。
 - 原理:App 在本机回环起控制通道,把 `端口/令牌` 写入 `agent/.control`;工具读取后用 bash 内建
   `/dev/tcp` 连上发命令(不依赖 `nc`)。
 
-> 典型调试循环:`edit foo.lua` → `bash agent/sandbox run foo.lua`(看有无报错/输出)→
+> **典型调试循环**:`edit foo.lua` → `bash agent/sandbox run foo.lua`(看有无报错/输出)→
 > `bash agent/sandbox reload`(应用到 UI)→ `bash agent/sandbox log -f`(观察运行日志)。
+> run 和 reload **不打断 log -f**——两个 TCP 连接互不干扰,一条管道跑命令,
+> 另一条 keep-alive 管道持续推日志,可在修改后立刻看到错误。
 
 ---
 
@@ -726,106 +784,81 @@ host.write_file(path, json.encode(t))
 
 ---
 
-## 十五、音频播放引擎
+## 十五、音频播放 API
 
-App 内置一个 **headless love2d 音频引擎**,通过 `host.audio_player(name)` 创建播放器实例,
-支持本地文件和 HTTP/HTTPS URL,任意 Lua 脚本都可以用它做 BGM、SFX、音乐播放器等。
+App 内置一个 **headless love2d 音频引擎**(`games/audio_svc`),通过加密 TCP 通道收发命令/事件。
+Lua 侧封装为两个纯底层库(`sandbox/audio_player.lua` 和 `sandbox/audio_recorder.lua`),
+可在任意脚本中 `require` 使用。
 
-### 核心概念
+### 播放器 (`sandbox/audio_player.lua`)
 
-音频引擎单独跑一个无渲染界面的 love2d 进程 (`games/audio_svc`),通过加密 TCP 通道收发命令/事件。
-一个 Player 实例 = 引擎内的一个**声道 (channel)**,不同 channel 可并行播放互不干扰。
-
-```lua
-local bgm = host.audio_player("bgm")
-local sfx = host.audio_player("sfx")
-bgm:play("/sdcard/bgm.mp3", { loop = true })
-sfx:play("/sdcard/shot.wav")
-```
-
-### Player 对象 (推荐)
-
-**创建后立即可用,无需手动 `ensure` 或 `require`——引擎在首个 play 时自动启动。**
+创建实例(每个实例对应引擎内一个 channel,可并行播放互不干扰):
 
 ```lua
-local p = host.audio_player(name)   -- name 同时也是 channel 名和 reactive key 前缀
+local player = require("sandbox.audio_player")("bgm")
 ```
 
-#### 播放控制
+**传输控制:**
 
-| 方法                             | 说明                                     |
-| -------------------------------- | ---------------------------------------- |
-| `p:play(path, opts)`            | 播放本地路径或 HTTP URL。opts:`{volume, loop, start_pos}`(均可选) |
-| `p:pause()`                     | 暂停                                     |
-| `p:resume()`                    | 从暂停位恢复                             |
-| `p:stop()`                      | 停止并释放资源                           |
-| `p:seek(pos_sec)`               | 跳转到指定秒数                           |
-| `p:set_volume(v)`               | 设置音量 (0.0 ~ 1.0)                     |
-| `p:set_loop(loop)`              | 设置循环 (`true`/`false`)                |
+| 方法                               | 说明                                     |
+| ---------------------------------- | ---------------------------------------- |
+| `player:play(path, opts)`          | 播放本地路径或 HTTP URL                   |
+| `player:pause()`                   | 暂停                                     |
+| `player:resume()`                  | 从暂停位恢复                              |
+| `player:stop()`                    | 停止并释放当前资源                         |
+| `player:seek(pos_sec)`             | 跳转到指定秒数                             |
+| `player:setVolume(v)`              | 设置音量 (0.0 ~ 1.0)                      |
+| `player:setLoop(true/false)`       | 设置循环                                  |
 
-文件路径支持 `/storage/emulated/0/...`(共享存储)、`http(s)://`(在线),引擎自动处理
-文件复制和下载,脚本无需关心底层 PhysFS 沙盒。
+`play()` 的 `opts` 可选表: `{ volume, loop, start }` (均可省略,默认继承最近一次设置)。
 
-#### 同步属性
+**同步属性**(只读,引擎事件自动更新):
 
-| 属性          | 类型    | 说明                     |
-| ------------- | ------- | ------------------------ |
-| `p.playing`   | bool    | 是否正在播放             |
-| `p.position`  | number  | 当前播放位置 (秒)        |
-| `p.duration`  | number  | 总时长 (秒,未知时为 0)   |
+| 属性             | 类型    | 说明                       |
+| ---------------- | ------- | -------------------------- |
+| `player.playing` | bool    | 是否正在播放                |
+| `player.position`| number  | 当前播放位置 (秒)           |
+| `player.duration`| number  | 总时长 (秒,未知时为 0)      |
+| `player.error`   | string? | 最近一次错误消息或 nil      |
 
-#### UI 绑定
-
-Player 自动维护 5 个 `reactive` 键,供 `text{bind=...}` 直接绑定:
+**事件**(typed,每个返回 listener id):
 
 ```lua
-p:key("position")   -- "name.position"  → 已格式化为 "MM:SS" 字符串
-p:key("duration")   -- "name.duration"  → 已格式化为 "MM:SS"
-p:key("playing")    -- "name.playing"   → bool (用于条件构建按钮)
-p:key("status")     -- "name.status"    → "就绪"/"加载中…"/"正在播放"/"已暂停"/"已停止"/"错误: …"
-p:key("error")      -- "name.error"     → 错误描述字符串
+local id = player:on("state",   function(d) end)  -- d = {playing, position, duration}
+           player:on("started", function()   end)
+           player:on("paused",  function()   end)
+           player:on("resumed", function()   end)
+           player:on("stopped", function()   end)
+           player:on("ended",   function()   end)
+           player:on("error",   function(msg)end)  -- msg 是错误描述字符串
+
+player:off(event, id)   -- 注销单个监听器
+player:off(event)       -- 注销该事件全部监听器
 ```
 
-#### 自定义事件
-
-Player 会自动处理 state 更新,如需额外处理(进度条渲染、歌词同步),用 `on_event`:
+**生命周期:**
 
 ```lua
-p:on_event(function(evttype, data)
-  if evttype == "state" then
-    -- data = { playing, position, duration, channel }
-    local pos = tonumber(data.position) or 0
-    -- 更新自定义 reactive 或直接操作 UI
-  end
-end)
+player:dispose()         -- stop + 注销全部监听器
 ```
 
-事件类型: `"started"`, `"paused"`, `"resumed"`, `"stopped"`, `"ended"`, `"error"`, `"state"`。
-
-#### 生命周期
-
-```lua
-p:on_event(fn)      -- 注册事件回调
-p:off_event(fn)     -- 注销 (传递注册时的函数引用)
-p:dispose()         -- 注销所有事件 + stop + 释放监听器; 离开页面前调用
-```
-
-#### 完整示例: 简单播放器
+**完整示例 — 简单播放器:**
 
 ```lua
 app.page("player", function()
-  local P = host.audio_player("demo")
-  local _rebuild = state("demo.rebuild", 0)  -- 按钮更新需要 state 驱动重建
+  local P = require("sandbox.audio_player")("demo")
+  local _rebuild = state("demo.rebuild", 0)
+  _rebuild.get()
 
-  P:on_event(function(evttype, data)
-    if evttype ~= "state" then _rebuild.set(_rebuild.get() + 1) end
-  end)
+  P:on("started", function() _rebuild.set(_rebuild.get() + 1) end)
+  P:on("paused",  function() _rebuild.set(_rebuild.get() + 1) end)
+  P:on("stopped", function() _rebuild.set(_rebuild.get() + 1) end)
 
   return column({
     row({
       iconbutton("folder_open", function()
         host.input({ title = "音频文件路径", hint = "/sdcard/Music/song.mp3" },
-          function(path) if path and path ~= "" then P:play(path) end end)
+          function(path) if path then P:play(path) end end)
       end, { tooltip = "打开文件" }),
       spacer(),
       function()
@@ -837,110 +870,186 @@ app.page("player", function()
       end,
     }),
     spacer(8),
-    row({
-      text("", { bind = P:key("position"), size = 12, color = "grey" }),
-      spacer(),
-      text("", { bind = P:key("duration"), size = 12, color = "grey" }),
-    }),
-    text("", { bind = P:key("status"), size = 11, color = "grey", align = "center" }),
-    text("", { bind = P:key("error"), size = 11, color = "red", align = "center" }),
+    text(P.playing and "正在播放" or "已停止", { size = 12, color = "grey", align = "center" }),
   }, { gap = 4 })
 end)
 ```
 
-> **关键模式**: Player 的 `reactive` 更新不会触发页面重建,只刷新 `bind` 绑定的组件。
-> 按钮(播放/暂停图标切换)是条件渲染,必须用 `state` 驱动整页重建来重新创建。
-> 做法是 `P:on_event` 里对非 `state` 事件递增一个 `_rebuild` state。
-
-### 底层 API (`host.audio_*`)
-
-Player 封装了这些底层函数,仅建议有定制需求时直接使用:
-
-```lua
-host.audio_ensure()                           -- 启动引擎 (Player 自动调用)
-host.audio_play(path, {channel, volume, loop, start_pos})
-host.audio_pause(channel)
-host.audio_resume(channel)
-host.audio_stop(channel)
-host.audio_seek(pos, channel)
-host.audio_set_volume(v, channel)
-host.audio_set_loop(loop, channel)
-host.audio_state(channel)                     -- → { playing, position, duration, channel }
-local id = host.audio_on_event(fn)            -- fn(channel, type, data); 返回 listener id
-host.audio_off_event(id)                      -- 注销监听器
-```
-
-### 多声道示例: BGM + SFX
-
-```lua
-local bgm = host.audio_player("bgm")
-local sfx = host.audio_player("sfx")
-
-bgm:play("/sdcard/bgm.mp3", { loop = true, volume = 0.6 })
-sfx:play("/sdcard/shot.wav")
-
--- 两路独立控制
-bgm:pause()    -- 暂停背景音乐, 音效继续
-sfx:play("/sdcard/explosion.wav")  -- 播放新的音效
-bgm:resume()   -- 恢复背景音乐
-```
-
-### 与 love2d 游戏配合
-
-headless 音频引擎和 love2d 游戏画布**互不干扰**——它们是独立进程、独立 TCP 通道。
-游戏里要让 UI 控制音频,通过 `love_host` 发送消息即可:
-
-```lua
--- UI 侧
-love.send(canvasId, "play_bgm", { path = "/sdcard/bgm.mp3" })
-
--- 游戏 main.lua
-local host = require("love_host")
-host.on("play_bgm", function(data)
-  -- 游戏进程内没有 audio_player, 需要自行管理 love.audio
-end)
-```
-
-更推荐的做法是**音频全由 UI 侧 Player 管理**,游戏只处理游戏逻辑——UI 点播放按钮 → Player 播音频 + `love.send` 通知游戏当前状态。
+> **设计原则**: API 模块**不输出任何 UI 相关数据**——属性全为 raw 数字/bool,事件携带结构化 raw data,
+> 无中文状态字符串、无时间格式化、无 reactive 键。UI 显示由消费方自行处理。
 
 ---
 
-## 附:接入 AI 聊天 API(流式,用 reactive 逐字刷新)
+## 十六、音频录制 API
 
-流式逐字输出用 `reactive` + `text{bind=}`,只重绘回复文本,不重跑整页(高频更新更流畅):
+`sandbox/audio_recorder.lua` — 纯录音 API + 回放 handle。
 
 ```lua
-app.page("chat", function()
-  local input = state("chat.in", "")
-  local answer = reactive("chat.out", "")          -- 用 reactive 承载流式回复
-  local function send()
-    answer.set("")
-    host.http{
-      url = "https://api.openai.com/v1/chat/completions",
-      method = "POST",
-      headers = { ["Content-Type"]="application/json",
-                  Authorization="Bearer "..host.get("openai_key") },
-      body = json.encode({ model="gpt-4o-mini", stream=true,
-        messages = { { role="user", content=input.get() } } }),
-      stream = true,
-      on_chunk = function(chunk)
-        for line in chunk:gmatch("[^\n]+") do
-          local data = line:match("^data: (.+)")
-          if data and data ~= "[DONE]" then
-            local o = json.decode(data)
-            local d = o and o.choices and o.choices[1]
-                      and o.choices[1].delta and o.choices[1].delta.content
-            if d then answer.set(answer.get()..d) end   -- 只刷新绑定的文本
-          end
-        end
-      end,
-      on_error = function(err) host.toast("出错: "..tostring(err)) end,
-    }
+local rec = require("sandbox.audio_recorder")("voice")
+```
+
+**录制传输:**
+
+| 方法                               | 说明                                          |
+| ---------------------------------- | --------------------------------------------- |
+| `rec:start(opts)`                  | 开始录制。opts: `{ rate, bits, channels }`    |
+| `rec:stop()`                       | 停止并保存                                    |
+| `rec:pause()`                      | 暂停录制                                      |
+| `rec:resume()`                     | 继续录制                                      |
+| `rec:discard()`                    | 丢弃录音                                      |
+
+默认录制参数: `rate=44100, bits=16, channels=1`。
+
+**同步属性**(只读):
+
+| 属性               | 类型    | 说明                         |
+| ------------------ | ------- | ---------------------------- |
+| `rec.recording`    | bool    | 麦克风输入活动中              |
+| `rec.paused`       | bool    | 录制暂停中                   |
+| `rec.position`     | number  | 当前已录制秒数                |
+| `rec.duration`     | number  | 总时长 (stop 后设置)          |
+| `rec.hasRecording` | bool    | stop 后有可用数据             |
+| `rec.error`        | string? | 最近一次错误                  |
+| `rec.channel`      | string  | channel 名 (用于互操作)       |
+
+**事件:**
+
+```lua
+rec:on("state",     function(d) end)  -- d = {recording, paused, position}
+rec:on("started",   function()   end)
+rec:on("paused",    function()   end)
+rec:on("resumed",   function()   end)
+rec:on("stopped",   function(d) end)  -- d = {duration}
+rec:on("discarded", function()   end)
+rec:on("error",     function(msg)end)
+```
+
+**回放 handle** (`rec:playback()` 返回):
+
+```lua
+local pb = rec:playback()              -- 默认 volume=1.0, amp=16.0
+local pb = rec:playback({ volume=0.8, amp=32 })
+
+pb:play()           -- 从头播放录制数据
+pb:pause()          -- 暂停回放
+pb:resume()         -- 继续回放
+pb:stop()           -- 停止回放
+pb:seek(pos_sec)    -- 跳转
+
+pb.playing          -- bool (回放中?)
+pb.position         -- number (秒)
+pb.duration         -- number (秒)
+pb.error            -- string or nil
+
+pb:on("state", fn)  -- 与 player 同形的事件接口
+pb:dispose()        -- 停止 + 注销监听
+```
+
+**完整示例 — 录音机:**
+
+```lua
+app.page("recorder", function()
+  local rec = require("sandbox.audio_recorder")("rec")
+  local _rebuild = state("rec.rebuild", 0)
+  _rebuild.get()
+
+  local function fmt(sec)
+    sec = tonumber(sec) or 0
+    return string.format("%02d:%02d", math.floor(sec/60), math.floor(sec%60))
   end
-  return { card("AI 聊天", {
-    textfield({ label="问点什么", value=input.get(), onChanged=function(v) input.set(v) end }),
-    spacer(8), button("发送", send, { icon="send" }), spacer(12),
-    text("", { bind = "chat.out", color = "grey" }),   -- 绑定流式回复
-  }) }
+
+  for _, e in ipairs({"started","paused","resumed","stopped","discarded"}) do
+    rec:on(e, function() _rebuild.set(_rebuild.get() + 1) end)
+  end
+
+  local pb = nil
+  if rec.hasRecording and not pb then pb = rec:playback() end
+
+  return column({
+    text(fmt(rec.position), { size = 36, weight = "bold", align = "center" }),
+    spacer(8),
+    row({
+      rec.recording and not rec.paused and iconbutton("stop", function() rec:stop() end, { color = "error" })
+        or rec.recording and iconbutton("play_arrow", function() rec:resume() end, { color = "primary" })
+        or iconbutton("mic", function() rec:start() end, { color = "primary" }),
+      rec.hasRecording and iconbutton("play_arrow", function() pb:play() end) or nil,
+      rec.hasRecording and iconbutton("delete", function() rec:discard() end, { color = "error" }) or nil,
+    }, { main = "center", gap = 12 }),
+  }, { gap = 8 })
 end)
 ```
+
+> **与 player 同样的设计原则**: raw 属性、typed 事件、零 UI 假设。录制和回放分离(录制只管录,
+> `playback()` 返回独立 handle)。
+
+---
+
+## 十七、系统媒体会话
+
+将音频播放注册到 Android 系统通知栏媒体控件中——歌曲名/歌手/专辑在通知栏、锁屏、车载屏幕上显示,
+Play/Pause/Skip/Seek 按键可通过系统 UI 控制播放器。
+
+**这是一个可选功能** — 仅做音乐播放器时启用,做游戏音效或页面背景音乐时不调用即可,零开销。
+
+在 `audio_player` 实例上调用:
+
+```lua
+local player = require("sandbox.audio_player")("bgm")
+```
+
+| 方法                                       | 说明                                       |
+| ------------------------------------------ | ------------------------------------------ |
+| `player:enableMediaSession(opts)`          | 启用系统控件并设置歌曲信息                  |
+| `player:updateMediaSession(opts)`          | 更新播放状态 / 切歌                         |
+| `player:disableMediaSession()`             | 关闭系统控件                                |
+| `player:onMediaButton(fn)`                 | 注册系统控件按键回调                         |
+
+**enableMediaSession / updateMediaSession 的 opts 字段:**
+
+| 字段       | 类型    | 说明                                      |
+| ---------- | ------- | ----------------------------------------- |
+| `title`    | string  | 歌曲名                                    |
+| `artist`   | string  | 歌手                                      |
+| `album`    | string  | 专辑                                      |
+| `duration` | number  | 总时长 (秒)                                |
+| `state`    | string  | `"playing"` / `"paused"` / `"stopped"`   |
+| `position` | number  | 当前播放位置 (秒)                           |
+
+**onMediaButton 回调:**
+
+```lua
+player:onMediaButton(function(action, position)
+  -- action: "play" / "pause" / "skip_next" / "skip_prev" / "seek"
+  -- position: 跳转目标秒数 (仅 seek 时有值)
+  if action == "play" then player:resume()
+  elseif action == "pause" then player:pause()
+  elseif action == "skip_next" then next_song()
+  elseif action == "skip_prev" then prev_song()
+  elseif action == "seek" then player:seek(tonumber(position) or 0)
+  end
+end)
+```
+
+**典型用法(在玩家器应用中):**
+
+```lua
+-- 播放歌曲时启用
+player:play(song_path)
+player:enableMediaSession({
+  title = "歌名", artist = "歌手", album = "专辑", duration = 180,
+})
+
+-- 状态变化时更新
+player:on("started", function() player:updateMediaSession({ state = "playing" }) end)
+player:on("paused",  function() player:updateMediaSession({ state = "paused" }) end)
+player:on("stopped", function() player:updateMediaSession({ state = "stopped" }) end)
+
+-- 切歌时更新元数据
+player:updateMediaSession({ title = "下一首歌", artist = "新歌手" })
+
+-- 离开页面时关闭
+player:disableMediaSession()
+```
+
+> `dispose()` 会自动 release media session,无需手动调 `disableMediaSession()`。`sandbox/audio_player.lua:208`。
+

@@ -33,7 +33,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '7';
+  static const String _defaultScriptsVersion = '12';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -221,6 +221,19 @@ class ScriptManager {
     try {
       _extStorageGranted = await Permission.manageExternalStorage.isGranted;
     } catch (_) {}
+  }
+
+  /// 录音权限: 未授权时自动弹窗。返回 true 表示已授权。
+  Future<bool> _ensureRecordPermission() async {
+    try {
+      if (await Permission.microphone.isGranted) return true;
+      final status = await Permission.microphone.request();
+      if (status.isGranted) return true;
+      LuaLog.instance.warn('麦克风权限被拒绝, 录音功能不可用');
+    } catch (e) {
+      LuaLog.instance.error('麦克风权限请求失败: $e');
+    }
+    return false;
   }
 
   /// 文件类 host 处理器调用: 目标在外部存储且未授权时, 主动在 Flutter 层弹窗申请
@@ -758,6 +771,69 @@ class ScriptManager {
     e.registerHandler('audio_off_event', (a) {
       final id = a.isNotEmpty && a[0] is int ? a[0] as int : -1;
       LoveAudioManager.instance.removeListener(id);
+      return null;
+    });
+    // 录音 — 同步启动（权限由 love C++ 层内部自动申请）
+    e.registerHandler('audio_record_start', (a) {
+      final channel = a.isNotEmpty ? '${a[0]}' : 'default';
+      final opts = a.length > 1 && a[1] is Map ? a[1] as Map : <String, dynamic>{};
+      final rate = (opts['rate'] as int?) ?? 44100;
+      final bits = (opts['bits'] as int?) ?? 16;
+      final chans = (opts['chans'] as int?) ?? 1;
+      debugPrint('[ScriptManager] audio_record_start -> channel=$channel rate=$rate');
+      LoveAudioManager.instance.recordStart(channel, rate: rate, bits: bits, chans: chans);
+      return null;
+    });
+    e.registerHandler('audio_record_stop', (a) {
+      LoveAudioManager.instance.recordStop(a.isNotEmpty ? '${a[0]}' : 'default');
+      return null;
+    });
+    e.registerHandler('audio_record_pause', (a) {
+      LoveAudioManager.instance.recordPause(a.isNotEmpty ? '${a[0]}' : 'default');
+      return null;
+    });
+    e.registerHandler('audio_record_resume', (a) {
+      LoveAudioManager.instance.recordResume(a.isNotEmpty ? '${a[0]}' : 'default');
+      return null;
+    });
+    e.registerHandler('audio_record_discard', (a) {
+      LoveAudioManager.instance.recordDiscard(a.isNotEmpty ? '${a[0]}' : 'default');
+      return null;
+    });
+    e.registerHandler('audio_record_play', (a) {
+      final channel = a.isNotEmpty ? '${a[0]}' : 'default';
+      final opts = a.length > 1 && a[1] is Map ? a[1] as Map : <String, dynamic>{};
+      LoveAudioManager.instance.recordPlay(channel,
+          volume: (opts['volume'] as num?)?.toDouble() ?? 1.0,
+          amp: (opts['amp'] as num?)?.toDouble() ?? 16.0);
+      return null;
+    });
+    // 系统媒体会话 (通知栏播放控件)
+    e.registerHandler('media_session_init', (a) {
+      MediaSessionBridge.instance.init();
+      return null;
+    });
+    e.registerHandler('media_session_update', (a) {
+      final opts = a.isNotEmpty && a[0] is Map ? a[0] as Map : <String, dynamic>{};
+      MediaSessionBridge.instance.updateMetadata(
+        title: opts['title']?.toString(),
+        artist: opts['artist']?.toString(),
+        album: opts['album']?.toString(),
+        duration: (opts['duration'] is num) ? (opts['duration'] as num).toInt() : 0,
+      );
+      MediaSessionBridge.instance.updatePlaybackState(
+        state: opts['state']?.toString() ?? 'playing',
+        position: (opts['position'] is num) ? (opts['position'] as num).toInt() : 0,
+      );
+      return null;
+    });
+    e.registerHandler('media_session_release', (a) {
+      MediaSessionBridge.instance.release();
+      return null;
+    });
+    e.registerHandler('media_session_on_button', (a) {
+      final fn = a.isNotEmpty ? a[0] : null;
+      MediaSessionBridge.instance.setButtonHandler(fn is LuaFunctionRef ? fn : null);
       return null;
     });
     // 持久化存储 (原生 SQLite 通道)。

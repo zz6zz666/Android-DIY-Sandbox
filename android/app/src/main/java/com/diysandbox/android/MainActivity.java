@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ComponentName;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
@@ -39,6 +40,11 @@ import androidx.core.app.NotificationManagerCompat;
 import androidx.fragment.app.FragmentActivity;
 import androidx.fragment.app.FragmentManager;
 
+import android.support.v4.media.MediaMetadataCompat;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
+import androidx.media.session.MediaButtonReceiver;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -62,6 +68,11 @@ public class MainActivity extends FragmentActivity {
     // 文件选择器相关
     private static final int FILE_CHOOSER_REQUEST_CODE = 1;
     private ValueCallback<Uri[]> filePathCallback;
+
+    // MediaSession (系统媒体控件)
+    private MediaSessionCompat mediaSession;
+    private static final String MEDIA_CHANNEL_ID = "sandbox_media_session";
+    private static final int MEDIA_NOTIFY_ID = 2000;
 
     // 双击返回退出相关
     private boolean doubleBackToExitPressedOnce = false;
@@ -116,7 +127,44 @@ public class MainActivity extends FragmentActivity {
                         default:
                             result.notImplemented();
                     }
-                });
+                 });
+        // 系统媒体会话 (通知栏播放控件)
+        MethodChannel mediaSessionCh = new MethodChannel(
+                flutterEngine.getDartExecutor().getBinaryMessenger(), "media_session");
+        mediaSessionCh.setMethodCallHandler((call, result) -> {
+            switch (call.method) {
+                case "init": {
+                    initMediaSession(mediaSessionCh);
+                    result.success(null);
+                    break;
+                }
+                case "updateMetadata": {
+                    String title = call.argument("title");
+                    String artist = call.argument("artist");
+                    String album = call.argument("album");
+                    int duration = call.argument("duration") != null
+                            ? ((Number) call.argument("duration")).intValue() : 0;
+                    updateMediaSessionMetadata(title, artist, album, duration);
+                    result.success(null);
+                    break;
+                }
+                case "updatePlaybackState": {
+                    String state = call.argument("state");
+                    int position = call.argument("position") != null
+                            ? ((Number) call.argument("position")).intValue() : 0;
+                    updateMediaSessionPlaybackState(state, position);
+                    result.success(null);
+                    break;
+                }
+                case "release": {
+                    releaseMediaSession();
+                    result.success(null);
+                    break;
+                }
+                default:
+                    result.notImplemented();
+            }
+        });
         FlutterEngineCache.getInstance().put("my_engine_id", flutterEngine);
         if (flutterFragment == null) {
             flutterFragment = FlutterFragment.withCachedEngine("my_engine_id").build();
@@ -451,6 +499,158 @@ public class MainActivity extends FragmentActivity {
         } catch (IOException ignored) {
         }
         return map;
+    }
+
+    // ==================================================================
+    // MediaSession (system media controls / notification)
+    // ==================================================================
+
+    private void initMediaSession(MethodChannel ch) {
+        if (mediaSession != null) return;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel nc = new NotificationChannel(
+                    MEDIA_CHANNEL_ID, "媒体播放", NotificationManager.IMPORTANCE_LOW);
+            nc.setDescription("音频播放控制");
+            nc.setShowBadge(false);
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.createNotificationChannel(nc);
+        }
+
+        ComponentName receiver = new ComponentName(getPackageName(),
+                MediaButtonReceiver.class.getName());
+        mediaSession = new MediaSessionCompat(this, "DIY_Sandbox_Media", receiver, null);
+        mediaSession.setFlags(
+                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS |
+                MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        mediaSession.setCallback(new MediaSessionCompat.Callback() {
+            @Override
+            public void onPlay() {
+                ch.invokeMethod("onMediaButton",
+                        java.util.Collections.singletonMap("action", "play"));
+            }
+            @Override
+            public void onPause() {
+                ch.invokeMethod("onMediaButton",
+                        java.util.Collections.singletonMap("action", "pause"));
+            }
+            @Override
+            public void onSkipToNext() {
+                ch.invokeMethod("onMediaButton",
+                        java.util.Collections.singletonMap("action", "skip_next"));
+            }
+            @Override
+            public void onSkipToPrevious() {
+                ch.invokeMethod("onMediaButton",
+                        java.util.Collections.singletonMap("action", "skip_prev"));
+            }
+            @Override
+            public void onSeekTo(long pos) {
+                Map<String, Object> args = new HashMap<>();
+                args.put("action", "seek");
+                args.put("position", ((double) pos) / 1000.0);
+                ch.invokeMethod("onMediaButton", args);
+            }
+        });
+    }
+
+    private void updateMediaSessionMetadata(String title, String artist, String album, int durationSec) {
+        if (mediaSession == null) return;
+        MediaMetadataCompat.Builder b = new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title != null ? title : "")
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist != null ? artist : "")
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album != null ? album : "");
+        if (durationSec > 0) {
+            b.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationSec * 1000L);
+        }
+        mediaSession.setMetadata(b.build());
+        buildMediaNotification();
+    }
+
+    private void updateMediaSessionPlaybackState(String state, int positionSec) {
+        if (mediaSession == null) return;
+        int pbState;
+        long pos = positionSec * 1000L;
+        if ("playing".equals(state)) {
+            pbState = PlaybackStateCompat.STATE_PLAYING;
+        } else if ("paused".equals(state)) {
+            pbState = PlaybackStateCompat.STATE_PAUSED;
+        } else {
+            pbState = PlaybackStateCompat.STATE_STOPPED;
+            pos = 0;
+        }
+        PlaybackStateCompat pb = new PlaybackStateCompat.Builder()
+                .setState(pbState, pos, 1.0f)
+                .setActions(PlaybackStateCompat.ACTION_PLAY
+                        | PlaybackStateCompat.ACTION_PAUSE
+                        | PlaybackStateCompat.ACTION_PLAY_PAUSE
+                        | PlaybackStateCompat.ACTION_STOP
+                        | PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+                        | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+                        | PlaybackStateCompat.ACTION_SEEK_TO)
+                .build();
+        mediaSession.setPlaybackState(pb);
+        mediaSession.setActive(pbState != PlaybackStateCompat.STATE_STOPPED);
+        buildMediaNotification();
+    }
+
+    private void buildMediaNotification() {
+        if (mediaSession == null) return;
+        MediaMetadataCompat meta = mediaSession.getController().getMetadata();
+        PlaybackStateCompat pb = mediaSession.getController().getPlaybackState();
+        if (meta == null || pb == null) return;
+
+        String title = meta.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
+        String artist = meta.getString(MediaMetadataCompat.METADATA_KEY_ARTIST);
+        boolean playing = pb.getState() == PlaybackStateCompat.STATE_PLAYING;
+
+        Intent open = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        if (open == null) open = new Intent();
+        open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            piFlags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        PendingIntent contentPI = PendingIntent.getActivity(
+                this, MEDIA_NOTIFY_ID, open, piFlags);
+
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, MEDIA_CHANNEL_ID)
+                .setSmallIcon(getApplicationInfo().icon)
+                .setContentTitle(title != null ? title : "")
+                .setContentText(artist != null ? artist : "")
+                .setContentIntent(contentPI)
+                .setOngoing(playing)
+                .setAutoCancel(!playing)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
+                        .setMediaSession(mediaSession.getSessionToken())
+                        .setShowActionsInCompactView(0));
+
+        // Play/Pause action button
+        int actionIcon = playing
+                ? android.R.drawable.ic_media_pause
+                : android.R.drawable.ic_media_play;
+        String actionLabel = playing ? "暂停" : "播放";
+        PendingIntent actionPI = MediaButtonReceiver.buildMediaButtonPendingIntent(
+                this, playing ? PlaybackStateCompat.ACTION_PAUSE
+                        : PlaybackStateCompat.ACTION_PLAY);
+        b.addAction(new NotificationCompat.Action(actionIcon, actionLabel, actionPI));
+
+        try {
+            NotificationManagerCompat.from(this).notify(MEDIA_NOTIFY_ID, b.build());
+        } catch (SecurityException e) {
+            Log.w("MainActivity", "media notify denied: " + e);
+        }
+    }
+
+    private void releaseMediaSession() {
+        if (mediaSession != null) {
+            mediaSession.setActive(false);
+            mediaSession.release();
+            mediaSession = null;
+        }
+        NotificationManagerCompat.from(this).cancel(MEDIA_NOTIFY_ID);
     }
 
 }

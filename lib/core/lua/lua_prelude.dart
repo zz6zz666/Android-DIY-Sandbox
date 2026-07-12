@@ -329,6 +329,28 @@ end
   -- 注册事件回调; 返回 listener_id 供 audio_off_event 注销。
   function host.audio_on_event(fn) return __host_call("audio_on_event", fn) end
   function host.audio_off_event(id) return __host_call("audio_off_event", id) end
+  -- 录音: host.audio_record_start/stop/discard/play
+  function host.audio_record_start(channel, opts)
+    return __host_call("audio_record_start", channel, opts or {}) end
+  function host.audio_record_stop(channel) return __host_call("audio_record_stop", channel) end
+  function host.audio_record_pause(channel) return __host_call("audio_record_pause", channel) end
+  function host.audio_record_resume(channel) return __host_call("audio_record_resume", channel) end
+  function host.audio_record_discard(channel) return __host_call("audio_record_discard", channel) end
+  function host.audio_record_play(channel, opts)
+    return __host_call("audio_record_play", channel, opts or {}) end
+
+  -- 系统媒体会话 (通知栏播放控件) — 可选功能。
+  -- host.media_session_init()                         启动会话
+  -- host.media_session_update({title,artist,album,duration,state,position})
+  -- host.media_session_release()                      释放会话
+  -- host.media_session_on_button(fn)                  注册媒体按键回调
+  --   fn(action, position): action 为 "play"/"pause"/"skip_next"/"skip_prev"/"seek"
+  function host.media_session_init() return __host_call("media_session_init") end
+  function host.media_session_update(opts)
+    return __host_call("media_session_update", opts or {}) end
+  function host.media_session_release() return __host_call("media_session_release") end
+  function host.media_session_on_button(fn)
+    return __host_call("media_session_on_button", fn) end
 
 -- ==================== 持久化存储 (原生 SQLite) ====================
 -- store.open(name) 打开一个数据库(每个 name 一个独立文件, app 重启后数据保留)。

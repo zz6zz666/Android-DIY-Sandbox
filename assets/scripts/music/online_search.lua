@@ -10,30 +10,22 @@ local lyrics = nil
 local current_duration = 0
 
 -- ============================================================
--- 工具
+-- Tools
 -- ============================================================
 local function fmt_time(sec)
   return lrc.format_time(sec)
 end
 
-local function make_progress_bar(pos, duration, width)
-  width = width or 14
-  if duration <= 0 then return string.rep("─", width) end
-  local filled = math.floor(math.min(pos / duration, 1.0) * width + 0.5)
-  return string.rep("━", filled) .. string.rep("─", width - filled)
-end
-
 -- ============================================================
--- 反应式键
+-- Reactive keys
 -- ============================================================
 local KEYS = {
-  status = P:key("status"), title = "online.title",
-  artists = "online.artists", album = "online.album",
-  position = P:key("position"), duration = P:key("duration"),
-  progress_bar = "online.progress_bar",
+  title   = "online.title",  artists = "online.artists",
+  album   = "online.album",  position = "online.position",
+  duration = "online.duration",
   lyric_text = "online.lyric_text",
   lyric_prev = "online.lyric_prev", lyric_next = "online.lyric_next",
-  playing = P:key("playing"), art_url = "online.art_url",
+  playing = "online.playing", art_url = "online.art_url",
   search_info = "online.search_info",
 }
 
@@ -42,35 +34,57 @@ local function R(key, default)
 end
 
 -- ============================================================
--- 进度/歌词 + 页面重建 (从 Player 事件驱动)
+-- Progress/lyrics + page rebuild
 -- ============================================================
 local _rebuild = nil
 
-P:on_event(function(evttype, data)
-  if evttype == "state" and type(data) == "table" then
-    local pos = tonumber(data.position) or 0
-    local dur = tonumber(data.duration) or 0
-    if dur > 0 and dur ~= current_duration then
-      current_duration = dur
-      R(KEYS.duration).set(fmt_time(dur))
+P:on("state", function(data)
+  local pos = data.position or 0
+  local dur = data.duration or 0
+  if dur > 0 and dur ~= current_duration then
+    current_duration = dur
+    R(KEYS.duration).set(fmt_time(dur))
+  end
+  R(KEYS.position).set(fmt_time(pos))
+  R(KEYS.playing).set(data.playing == true)
+  if lyrics and #lyrics > 0 then
+    local idx = lrc.find_index(lyrics, pos)
+    if idx then
+      R(KEYS.lyric_text).set(lyrics[idx].text)
+      R(KEYS.lyric_prev).set(idx > 1 and lyrics[idx - 1].text or "")
+      R(KEYS.lyric_next).set(idx < #lyrics and lyrics[idx + 1].text or "")
     end
-    R(KEYS.progress_bar).set(make_progress_bar(pos, dur > 0 and dur or current_duration))
-    if lyrics and #lyrics > 0 then
-      local idx = lrc.find_index(lyrics, pos)
-      if idx then
-        R(KEYS.lyric_text).set(lyrics[idx].text)
-        R(KEYS.lyric_prev).set(idx > 1 and lyrics[idx - 1].text or "")
-        R(KEYS.lyric_next).set(idx < #lyrics and lyrics[idx + 1].text or "")
-      end
-    end
-  elseif evttype == "started" or evttype == "paused" or evttype == "resumed"
-      or evttype == "stopped" or evttype == "ended" or evttype == "error" then
-    if _rebuild then _rebuild.set(_rebuild.get() + 1) end
   end
 end)
 
+local function on_state_change()
+  if _rebuild then _rebuild.set(_rebuild.get() + 1) end
+end
+
+local function push_playing(v)
+  R(KEYS.playing).set(v)
+end
+
+P:on("started", function() push_playing(true);  P:updateMediaSession({ state = "playing" }); on_state_change() end)
+P:on("paused",  function() push_playing(false); P:updateMediaSession({ state = "paused" });  on_state_change() end)
+P:on("resumed", function() push_playing(true);  P:updateMediaSession({ state = "playing" }); on_state_change() end)
+P:on("stopped", function() push_playing(false); R(KEYS.position).set(fmt_time(0)); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
+P:on("ended",   function() push_playing(false); R(KEYS.position).set(fmt_time(0)); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
+P:on("error",   function(msg) on_state_change() end)
+
+-- System media buttons
+P:onMediaButton(function(action, position)
+  if action == "play" then
+    if current_song then
+      if P.playing then -- already playing, nothing to do
+      else P:resume() end
+    end
+  elseif action == "pause" then P:pause()
+  elseif action == "seek" then if position then P:seek(tonumber(position) or 0) end end
+end)
+
 -- ============================================================
--- 播放控制
+-- Playback control
 -- ============================================================
 
 local function play_online_song(song)
@@ -84,9 +98,7 @@ local function play_online_song(song)
   R(KEYS.artists).set(song.artists)
   R(KEYS.album).set(song.album)
   R(KEYS.art_url).set(song.pic_url or "")
-  R(KEYS.status).set("正在获取播放链接…")
   R(KEYS.duration).set(fmt_time(song.duration_ms / 1000))
-  R(KEYS.progress_bar).set(make_progress_bar(0, song.duration_ms / 1000))
   R(KEYS.lyric_text).set("")
   R(KEYS.lyric_prev).set("")
   R(KEYS.lyric_next).set("")
@@ -98,47 +110,50 @@ local function play_online_song(song)
         if lrc_text then lyrics = lrc.parse(lrc_text) end
       end)
       P:play(url)
+      P:enableMediaSession({
+        title    = song.name,
+        artist   = song.artists,
+        album    = song.album,
+        duration = math.floor(current_duration),
+      })
     else
-      R(KEYS.status).set("获取链接失败: " .. (err or "未知"))
-      host.toast("获取播放链接失败")
+      host.toast("Failed to get playback URL")
     end
   end)
 end
 
 local function toggle_play_pause()
-  if not current_song then host.toast("请先搜索并选择一首歌曲"); return end
+  if not current_song then host.toast("Please search first"); return end
   if P.playing then P:pause() else P:resume() end
 end
 
 local function do_search(keyword)
-  if not keyword or keyword == "" then host.toast("请输入搜索关键词"); return end
+  if not keyword or keyword == "" then host.toast("Enter a keyword"); return end
   search_results = {}
-  R(KEYS.search_info).set("搜索中…")
+  R(KEYS.search_info).set("Searching...")
   local rv = state("online.results_version", 0)
   api.search(keyword, function(results, err)
     if results then
       search_results = results
-      R(KEYS.search_info).set(#results > 0 and ("找到 " .. #results .. " 首") or "无结果")
+      R(KEYS.search_info).set(#results > 0 and ("Found " .. #results) or "No results")
       rv.set(rv.get() + 1)
     else
-      R(KEYS.search_info).set("搜索失败: " .. (err or "未知"))
+      R(KEYS.search_info).set("Failed: " .. (err or "unknown"))
       rv.set(rv.get() + 1)
     end
   end)
 end
 
 -- ============================================================
--- 构建 UI
+-- Build UI
 -- ============================================================
 
 function online.build(ctx)
-  R(KEYS.status, "就绪")
   R(KEYS.title, "")
   R(KEYS.artists, "")
   R(KEYS.album, "")
   R(KEYS.position, "00:00")
   R(KEYS.duration, "00:00")
-  R(KEYS.progress_bar, string.rep("─", 14))
   R(KEYS.lyric_text, "")
   R(KEYS.lyric_prev, "")
   R(KEYS.lyric_next, "")
@@ -154,22 +169,25 @@ function online.build(ctx)
   local r_playing = R(KEYS.playing)
   local r_art_url = R(KEYS.art_url)
 
+  local seek_max = (P.duration > 0 and P.duration) or (current_duration > 0 and current_duration) or 1
+  local seek_val = P.position or 0
+
   local function build_results()
     local items = {}
     for _, song in ipairs(search_results) do
       local is_cur = current_song and current_song.id == song.id
       table.insert(items, tile(song.name, {
-        subtitle = song.artists .. (song.album ~= "" and (" · " .. song.album) or ""),
+        subtitle = song.artists .. (song.album ~= "" and (" \194\183 " .. song.album) or ""),
         icon     = is_cur and "play_circle" or "music_note",
         trailing = is_cur and icon("volume_up", { color = "primary", size = 18 }) or nil,
         onTap = function() play_online_song(song) end,
       }))
     end
     if #items == 0 then
-      if R(KEYS.search_info).get() == "搜索中…" then
-        items = { row({ spinner(), spacer(8), text("搜索中…", { color = "grey" }) }, { main = "center" }) }
+      if R(KEYS.search_info).get() == "Searching..." then
+        items = { row({ spinner(), spacer(8), text("Searching...", { color = "grey" }) }, { main = "center" }) }
       else
-        items = { text("输入关键词搜索歌曲", { color = "grey", align = "center", size = 13 }) }
+        items = { text("Enter a keyword to search", { color = "grey", align = "center", size = 13 }) }
       end
     end
     return column(items, { gap = 0 })
@@ -179,7 +197,7 @@ function online.build(ctx)
     if not current_song then
       return column({
         divider(), spacer(16),
-        center(text("选择一首歌曲开始播放", { color = "grey", size = 14 })),
+        center(text("Select a song to play", { color = "grey", size = 14 })),
         spacer(16),
       })
     end
@@ -191,14 +209,18 @@ function online.build(ctx)
 
     local play_btn
     if r_playing.get() then
-      play_btn = iconbutton("pause_circle_filled", toggle_play_pause, { tooltip = "暂停", color = "primary" })
+      play_btn = inkwell(
+        icon("pause_circle", { size = 56, color = "primary" }),
+        { onTap = toggle_play_pause })
     else
-      play_btn = iconbutton("play_circle_filled", toggle_play_pause, { tooltip = "播放", color = "primary" })
+      play_btn = inkwell(
+        icon("play_circle", { size = 56, color = "primary" }),
+        { onTap = toggle_play_pause })
     end
 
     return column({
       divider(), spacer(8),
-      text("正在播放", { size = 13, color = "primary", weight = "bold" }),
+      text("Now Playing", { size = 13, color = "primary", weight = "bold" }),
       spacer(8),
       row({
         center(art_comp), spacer(12),
@@ -209,22 +231,25 @@ function online.build(ctx)
           text("", { bind = KEYS.album, size = 12, color = "grey", maxLines = 1 }),
         }, { gap = 0 })),
       }),
-      spacer(8),
-      column({
-        text("", { bind = KEYS.progress_bar, size = 16, color = "primary", align = "center" }),
-        spacer(2),
+      spacer(12),
+      padding(
         row({
           text("", { bind = KEYS.position, size = 11, color = "grey" }),
-          spacer(),
+          spacer(6),
+          expanded(slider({
+            value = seek_val,
+            min = 0,
+            max = seek_max,
+            onChanged = function(v) P:seek(v) end,
+          })),
+          spacer(6),
           text("", { bind = KEYS.duration, size = 11, color = "grey" }),
         }),
-        spacer(2),
-        text("", { bind = KEYS.status, size = 10, color = "grey", align = "center" }),
-      }, { gap = 0 }),
+        { h = 0, v = 0 }),
       spacer(4),
       row({ play_btn }, { main = "center" }),
       spacer(8),
-      text("── 歌词 ──", { size = 11, color = "grey", align = "center" }),
+      text("\226\148\128\226\148\128 Lyrics \226\148\128\226\148\128", { size = 11, color = "grey", align = "center" }),
       spacer(4),
       text("", { bind = KEYS.lyric_prev, size = 12, color = "grey", align = "center", maxLines = 1, ellipsis = true }),
       spacer(2),
@@ -238,12 +263,12 @@ function online.build(ctx)
   return column({
     row({
       expanded(textfield({
-        hint = "输入歌名、歌手...",
+        hint = "Search songs...",
         value = keyword_st.get(),
         onChanged = function(v) keyword_st.set(v) end,
       })),
       spacer(8),
-      iconbutton("search", function() do_search(keyword_st.get()) end, { tooltip = "搜索" }),
+      iconbutton("search", function() do_search(keyword_st.get()) end, { tooltip = "Search" }),
     }, { gap = 0 }),
     spacer(8),
     text("", { bind = KEYS.search_info, size = 11, color = "grey" }),
@@ -255,6 +280,7 @@ end
 
 function online.dispose()
   P:stop()
+  P:disableMediaSession()
 end
 
 return online

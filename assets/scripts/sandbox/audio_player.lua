@@ -1,132 +1,213 @@
-local function fmt_time(sec)
-  sec = tonumber(sec) or 0
-  local m = math.floor(sec / 60)
-  local s = math.floor(sec % 60)
-  return string.format("%02d:%02d", m, s)
-end
+-- Generic audio playback API. Transport + raw state + typed events.
+-- No UI assumptions (no Chinese, no time formatting, no reactive keys).
+--
+-- Configuration:
+--   local player = require("sandbox.audio_player")("bgm")
+--
+-- Transport:
+--   player:play("/sdcard/song.mp3")
+--   player:play("/sdcard/song.mp3", { volume=0.8, loop=true, start=10.5 })
+--   player:pause()        -- pause playback
+--   player:resume()       -- resume from paused
+--   player:stop()         -- stop and release source
+--   player:seek(30.0)     -- jump to position (seconds)
+--   player:setVolume(0.5) -- adjust volume in-flight (0.0 ~ 1.0)
+--   player:setLoop(true)  -- toggle looping
+--
+-- State (read-only properties, auto-updated from engine events):
+--   player.playing   -- boolean
+--   player.position  -- number (seconds, 0 if unknown)
+--   player.duration  -- number (seconds, 0 if unknown)
+--   player.error     -- string or nil
+--
+-- Events (typed, each returns a listener id):
+--   local id = player:on("state",   function(d) end)  -- d = {playing, position, duration}
+--                player:on("started", function()   end)
+--                player:on("paused",  function()   end)
+--                player:on("resumed", function()   end)
+--                player:on("stopped", function()   end)
+--                player:on("ended",   function()   end)
+--                player:on("error",   function(msg)end)  -- msg is string
+--   player:off(event, id)   -- remove one listener
+--   player:off(event)       -- remove all listeners for that event
+--
+-- System media session (optional — only for full music player use cases):
+--   player:enableMediaSession({ title, artist, album, duration })
+--   player:updateMediaSession({ title, artist, state, position })
+--   player:disableMediaSession()
+--   player:onMediaButton(fn)   -- fn(action, position): "play"/"pause"/"skip_next"/"skip_prev"/"seek"
+--
+-- Lifecycle:
+--   player:dispose()  -- stop + release media session + remove all listeners
 
 return function(name)
-  name = name or "audio"
   host.audio_ensure()
+  name = name or "audio"
 
-  local ch = name
   local self = {
-    _name = name,
-    playing = false,
-    position = 0,
-    duration = 0,
+    name      = name,
+    playing   = false,
+    position  = 0,
+    duration  = 0,
+    error     = nil,
+    _volume   = 1.0,
+    _loop     = false,
   }
-  local _custom = {}
-  local _listener_id
+  local _events = {}    -- { state = { [id]=fn, ... }, started = {...}, ... }
+  local _nextId = 0
+  local _hostId
+  local _playing = false  -- track last known state
 
-  -- 直接写 Dart notifier, 不创建 Lua reactive 对象 (避免泄漏到组件树)
-  local function _set(key, val)
-    __host_call("reactive_set", name .. "." .. key, val)
+  local function _emit(event, ...)
+    local t = _events[event]
+    if not t then return end
+    for _, fn in pairs(t) do
+      pcall(fn, ...)
+    end
   end
 
-  _set("playing", false)
-  _set("position", "00:00")
-  _set("duration", "00:00")
-  _set("status", "就绪")
-  _set("error", "")
-
-  _listener_id = host.audio_on_event(function(channel, evttype, data)
-    if channel ~= ch then return end
+  _hostId = host.audio_on_event(function(channel, evttype, data)
+    if channel ~= name then return end
     if evttype == "state" and type(data) == "table" then
-      local p = data.playing == true
-      local pos = tonumber(data.position) or 0
-      local dur = tonumber(data.duration) or 0
-      self.playing = p
-      self.position = pos
-      self.duration = dur
-      _set("playing", p)
-      _set("position", fmt_time(pos))
-      _set("duration", fmt_time(dur))
+      self.playing  = data.playing == true
+      self.position = tonumber(data.position) or 0
+      self.duration = tonumber(data.duration) or 0
+      _playing = self.playing
+      _emit("state", { playing = self.playing, position = self.position, duration = self.duration })
     elseif evttype == "started" then
       self.playing = true
-      _set("playing", true)
-      _set("status", "正在播放")
+      _playing = true
       if type(data) == "table" and data.duration then
-        local dur = tonumber(data.duration) or 0
-        self.duration = dur
-        _set("duration", fmt_time(dur))
+        self.duration = tonumber(data.duration) or 0
       end
+      _emit("started")
     elseif evttype == "paused" then
       self.playing = false
-      _set("playing", false)
-      _set("status", "已暂停")
+      _playing = false
+      _emit("paused")
     elseif evttype == "resumed" then
       self.playing = true
-      _set("playing", true)
-      _set("status", "正在播放")
+      _playing = true
+      _emit("resumed")
     elseif evttype == "stopped" or evttype == "ended" then
       self.playing = false
-      self.position = 0
-      _set("playing", false)
-      _set("position", fmt_time(0))
-      _set("status", "已停止")
+      _playing = false
+      if evttype == "stopped" then
+        self.position = 0
+      end
+      _emit("stopped")
+      if evttype == "ended" then _emit("ended") end
     elseif evttype == "error" then
-      local msg = (type(data) == "table" and data.msg) or "unknown"
-      _set("error", msg)
-      _set("status", "错误: " .. msg)
-    end
-    for _, fn in ipairs(_custom) do
-      pcall(fn, evttype, data)
+      local msg = (type(data) == "table" and data.msg) or tostring(data)
+      self.error = msg
+      _emit("error", msg)
     end
   end)
 
+  function self:on(event, fn)
+    _nextId = _nextId + 1
+    _events[event] = _events[event] or {}
+    _events[event][_nextId] = fn
+    return _nextId
+  end
+
+  function self:off(event, id)
+    if not event then return end
+    if id then
+      local t = _events[event]
+      if t then t[id] = nil end
+    else
+      _events[event] = nil
+    end
+  end
+
   function self:play(path, opts)
     opts = opts or {}
-    _set("error", "")
-    _set("status", "加载中…")
-    _set("position", fmt_time(0))
-    _set("duration", fmt_time(0))
+    self.error = nil
     self.position = 0
     self.duration = 0
+    self._volume = tonumber(opts.volume) or self._volume
+    self._loop   = opts.loop == true
+
     host.audio_play(path, {
-      channel   = ch,
-      volume    = opts.volume or 1.0,
-      loop      = opts.loop or false,
-      start_pos = opts.start_pos,
+      channel   = name,
+      volume    = self._volume,
+      loop      = self._loop,
+      start_pos = opts.start,
     })
   end
 
-  function self:pause()   host.audio_pause(ch) end
-  function self:resume()  host.audio_resume(ch) end
-  function self:stop()    host.audio_stop(ch) end
+  function self:pause()
+    host.audio_pause(name)
+  end
+
+  function self:resume()
+    host.audio_resume(name)
+  end
+
+  function self:stop()
+    host.audio_stop(name)
+  end
 
   function self:seek(pos)
-    host.audio_seek(tonumber(pos) or 0, ch)
+    host.audio_seek(tonumber(pos) or 0, name)
   end
 
-  function self:set_volume(v)
-    host.audio_set_volume(tonumber(v) or 1.0, ch)
+  function self:setVolume(v)
+    self._volume = math.max(0, math.min(1, tonumber(v) or 1))
+    host.audio_set_volume(self._volume, name)
   end
 
-  function self:set_loop(loop)
-    host.audio_set_loop(loop == true, ch)
+  function self:setLoop(loop)
+    self._loop = loop == true
+    host.audio_set_loop(self._loop, name)
   end
 
-  function self:key(k)
-    return name .. "." .. k
+  -- ============================================================
+  -- Optional: System Media Session (notification / lock screen controls)
+  -- ============================================================
+
+  function self:enableMediaSession(opts)
+    opts = opts or {}
+    host.media_session_init()
+    host.media_session_update({
+      title    = opts.title    or "",
+      artist   = opts.artist   or "",
+      album    = opts.album    or "",
+      duration = opts.duration or 0,
+      state    = "paused",
+      position = 0,
+    })
   end
 
-  function self:on_event(fn)
-    table.insert(_custom, fn)
+  function self:updateMediaSession(opts)
+    opts = opts or {}
+    host.media_session_update({
+      title    = opts.title,
+      artist   = opts.artist,
+      album    = opts.album,
+      duration = opts.duration,
+      state    = opts.state or (self.playing and "playing" or "paused"),
+      position = math.floor(opts.position or self.position),
+    })
   end
 
-  function self:off_event(fn)
-    for i, f in ipairs(_custom) do
-      if f == fn then table.remove(_custom, i); return end
-    end
+  function self:disableMediaSession()
+    host.media_session_release()
+  end
+
+  function self:onMediaButton(fn)
+    host.media_session_on_button(fn)
   end
 
   function self:dispose()
-    if _listener_id then
-      host.audio_off_event(_listener_id)
+    pcall(host.media_session_release)
+    if _hostId then
+      host.audio_off_event(_hostId)
+      _hostId = nil
     end
-    self:stop()
-    _custom = {}
+    pcall(host.audio_stop, name)
+    _events = {}
   end
 
   return self

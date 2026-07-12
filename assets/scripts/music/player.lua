@@ -10,7 +10,7 @@ local current_duration = 0
 local lyrics = nil
 
 -- ============================================================
--- 工具
+-- Tools
 -- ============================================================
 local function fmt_time(sec)
   return require("music.lrc").format_time(sec)
@@ -59,32 +59,23 @@ local function find_lrc_file(music_path)
   return nil
 end
 
-local function make_progress_bar(pos, duration, width)
-  width = width or 16
-  if duration <= 0 then return string.rep("─", width) end
-  local filled = math.floor(math.min(pos / duration, 1.0) * width + 0.5)
-  return string.rep("━", filled) .. string.rep("─", width - filled)
-end
-
 -- ============================================================
--- 反应式键
+-- Reactive keys
 -- ============================================================
 local KEYS = {
-  title        = "player.title",
-  artist       = "player.artist",
-  album        = "player.album",
-  position     = P:key("position"),
-  duration     = P:key("duration"),
-  progress_bar = "player.progress_bar",
-  playing      = P:key("playing"),
-  art_path     = "player.art_path",
-  lyric_text   = "player.lyric_text",
-  lyric_prev   = "player.lyric_prev",
-  lyric_next   = "player.lyric_next",
-  status       = P:key("status"),
-  music_dir    = "player.music_dir",
-  song_count   = "player.song_count",
-  backend      = "player.backend",
+  title     = "player.title",
+  artist    = "player.artist",
+  album     = "player.album",
+  position  = "player.position",
+  duration  = "player.duration",
+  playing   = "player.playing",
+  art_path  = "player.art_path",
+  lyric_text = "player.lyric_text",
+  lyric_prev = "player.lyric_prev",
+  lyric_next = "player.lyric_next",
+  music_dir = "player.music_dir",
+  song_count = "player.song_count",
+  backend   = "player.backend",
 }
 
 local function R(key, default)
@@ -92,35 +83,58 @@ local function R(key, default)
 end
 
 -- ============================================================
--- 进度/歌词 + 页面重建 (从 Player 事件驱动)
+-- Progress/lyrics + page rebuild
 -- ============================================================
-local _rebuild = nil  -- state, 按钮/status 变化时递增触发重建
+local _rebuild = nil
 
-P:on_event(function(evttype, data)
-  if evttype == "state" and type(data) == "table" then
-    local pos = tonumber(data.position) or 0
-    local dur = tonumber(data.duration) or 0
-    if dur > 0 and dur ~= current_duration then
-      current_duration = dur
-      R(KEYS.duration).set(fmt_time(dur))
+P:on("state", function(data)
+  local pos = data.position or 0
+  local dur = data.duration or 0
+  if dur > 0 and dur ~= current_duration then
+    current_duration = dur
+    R(KEYS.duration).set(fmt_time(dur))
+  end
+  R(KEYS.position).set(fmt_time(pos))
+  R(KEYS.playing).set(data.playing == true)
+  if lyrics and #lyrics > 0 then
+    local idx = lrc.find_index(lyrics, pos)
+    if idx then
+      R(KEYS.lyric_text).set(lyrics[idx].text)
+      R(KEYS.lyric_prev).set(idx > 1 and lyrics[idx - 1].text or "")
+      R(KEYS.lyric_next).set(idx < #lyrics and lyrics[idx + 1].text or "")
     end
-    R(KEYS.progress_bar).set(make_progress_bar(pos, dur > 0 and dur or current_duration))
-    if lyrics and #lyrics > 0 then
-      local idx = lrc.find_index(lyrics, pos)
-      if idx then
-        R(KEYS.lyric_text).set(lyrics[idx].text)
-        R(KEYS.lyric_prev).set(idx > 1 and lyrics[idx - 1].text or "")
-        R(KEYS.lyric_next).set(idx < #lyrics and lyrics[idx + 1].text or "")
-      end
-    end
-  elseif evttype == "started" or evttype == "paused" or evttype == "resumed"
-      or evttype == "stopped" or evttype == "ended" or evttype == "error" then
-    if _rebuild then _rebuild.set(_rebuild.get() + 1) end
   end
 end)
 
+local function on_state_change()
+  if _rebuild then _rebuild.set(_rebuild.get() + 1) end
+end
+
+local function push_playing(v)
+  R(KEYS.playing).set(v)
+end
+
+P:on("started", function() push_playing(true);  P:updateMediaSession({ state = "playing" }); on_state_change() end)
+P:on("paused",  function() push_playing(false); P:updateMediaSession({ state = "paused" });  on_state_change() end)
+P:on("resumed", function() push_playing(true);  P:updateMediaSession({ state = "playing" }); on_state_change() end)
+P:on("stopped", function() push_playing(false); R(KEYS.position).set(fmt_time(0)); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
+P:on("ended",   function() push_playing(false); R(KEYS.position).set(fmt_time(0)); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
+P:on("error",   function(msg) on_state_change() end)
+
+-- System media buttons
+P:onMediaButton(function(action, position)
+  if action == "play" then
+    if #playlist > 0 then
+      if current_index == 0 then play_index(1) else P:resume() end
+    end
+  elseif action == "pause" then P:pause()
+  elseif action == "skip_next" then next_song()
+  elseif action == "skip_prev" then prev_song()
+  elseif action == "seek" then if position then P:seek(tonumber(position) or 0) end end
+end)
+
 -- ============================================================
--- 播放控制
+-- Playback control
 -- ============================================================
 
 local function play_index(idx)
@@ -137,7 +151,6 @@ local function play_index(idx)
   R(KEYS.artist).set(song.artist)
   R(KEYS.album).set(song.album)
   R(KEYS.duration).set(fmt_time(current_duration))
-  R(KEYS.progress_bar).set(make_progress_bar(0, current_duration))
   R(KEYS.lyric_text).set("")
   R(KEYS.lyric_prev).set("")
   R(KEYS.lyric_next).set("")
@@ -154,10 +167,16 @@ local function play_index(idx)
   end
 
   P:play(song.path)
+  P:enableMediaSession({
+    title    = song.title,
+    artist   = song.artist,
+    album    = song.album,
+    duration = current_duration,
+  })
 end
 
 local function toggle_play_pause()
-  if #playlist == 0 then host.toast("请先扫描音乐目录"); return end
+  if #playlist == 0 then host.toast("\232\175\183\229\133\136\230\137\171\230\143\143\233\159\179\228\185\144\231\155\174\229\189\149"); return end
   if current_index == 0 then play_index(1); return end
   if P.playing then P:pause() else P:resume() end
 end
@@ -177,7 +196,7 @@ local function prev_song()
 end
 
 -- ============================================================
--- 扫描目录
+-- Scan directory
 -- ============================================================
 
 local function rescan_and_rebuild()
@@ -190,7 +209,8 @@ local function rescan_and_rebuild()
         table.insert(files, {
           path = it.path, name = it.name,
           title = it.name:gsub("%.[^%.]+$", ""),
-          artist = "未知艺术家", album = "", duration = 0,
+          artist = "\230\156\170\231\159\165\232\137\186\230\156\175\229\174\182",
+          album = "", duration = 0,
           lrc_path = nil, art_path = nil,
         })
       end
@@ -202,51 +222,52 @@ local function rescan_and_rebuild()
   current_index = 0; lyrics = nil
   P:stop()
 
-  R(KEYS.song_count).set(#files .. " 首")
-  R(KEYS.status).set(#files > 0 and "就绪" or "无音乐文件")
+  R(KEYS.song_count).set(#files .. " \233\166\150")
 
   if #files > 0 then
     for _, song in ipairs(files) do
       song.lrc_path = find_lrc_file(song.path)
       song.art_path = find_cover_art(song.path)
     end
-    host.toast("已扫描到 " .. #files .. " 首歌曲")
+    host.toast("\229\183\178\230\137\171\230\143\143\229\136\176 " .. #files .. " \233\166\150\230\173\140\230\155\178")
   else
-    host.toast("未找到音乐文件")
+    host.toast("\230\156\170\230\137\190\229\136\176\233\159\179\228\185\144\230\150\135\228\187\182")
   end
 end
 
 -- ============================================================
--- 构建 UI
+-- Build UI
 -- ============================================================
 
 function player.build(ctx)
-  local r_title      = R(KEYS.title, "选择一首歌曲")
-  local r_artist     = R(KEYS.artist, "")
-  local r_album      = R(KEYS.album, "")
-  local r_playing    = R(KEYS.playing, false)
-  local r_art_path   = R(KEYS.art_path, "")
-  local r_status     = R(KEYS.status, "就绪")
-  local r_music_dir  = R(KEYS.music_dir, music_dir)
+  local r_title     = R(KEYS.title, "\233\128\137\230\139\169\228\184\128\233\166\150\230\173\140\230\155\178")
+  local r_artist    = R(KEYS.artist, "")
+  local r_album     = R(KEYS.album, "")
+  local r_playing   = R(KEYS.playing, false)
+  local r_art_path  = R(KEYS.art_path, "")
+  local r_music_dir = R(KEYS.music_dir, music_dir)
   R(KEYS.position, "00:00")
   R(KEYS.duration, "00:00")
-  R(KEYS.progress_bar, string.rep("─", 16))
   R(KEYS.lyric_text, "")
   R(KEYS.lyric_prev, "")
   R(KEYS.lyric_next, "")
-  R(KEYS.song_count, "0 首")
+  R(KEYS.song_count, "0 \233\166\150")
   R(KEYS.backend, "Love Audio")
   _rebuild = state("player.rebuild", 0)
   _rebuild.get()
 
   local view_st = state("player.view", "player")
 
+  -- seek slider: read from raw properties (updated on rebuild)
+  local seek_max = (P.duration > 0 and P.duration) or (current_duration > 0 and current_duration) or 1
+  local seek_val = P.position or 0
+
   local function build_playlist_view()
     local items = {}
     for i, song in ipairs(playlist) do
       local is_cur = (i == current_index)
       table.insert(items, tile(song.title, {
-        subtitle = song.artist .. (song.album ~= "" and (" · " .. song.album) or ""),
+        subtitle = song.artist .. (song.album ~= "" and (" \194\183 " .. song.album) or ""),
         icon     = is_cur and "play_circle" or "music_note",
         trailing = is_cur and icon("volume_up", { color = "primary", size = 18 }) or nil,
         onTap = function() play_index(i); view_st.set("player") end,
@@ -254,8 +275,8 @@ function player.build(ctx)
     end
     if #items == 0 then
       items = {
-        text("播放列表为空", { color = "grey", align = "center" }),
-        text("请先扫描音乐目录", { color = "grey", align = "center", size = 13 }),
+        text("\230\146\173\230\148\190\229\136\151\232\161\168\228\184\186\231\169\186", { color = "grey", align = "center" }),
+        text("\232\175\183\229\133\136\230\137\171\230\143\143\233\159\179\228\185\144\231\155\174\229\189\149", { color = "grey", align = "center", size = 13 }),
       }
     end
     return column(items, { gap = 0 })
@@ -273,20 +294,20 @@ function player.build(ctx)
 
     local play_pause_btn
     if r_playing.get() then
-      play_pause_btn = iconbutton("pause_circle_filled", toggle_play_pause, {
-        tooltip = "暂停", color = "primary",
-      })
+      play_pause_btn = inkwell(
+        icon("pause_circle", { size = 56, color = "primary" }),
+        { onTap = toggle_play_pause })
     else
-      play_pause_btn = iconbutton("play_circle_filled", toggle_play_pause, {
-        tooltip = "播放", color = "primary",
-      })
+      play_pause_btn = inkwell(
+        icon("play_circle", { size = 56, color = "primary" }),
+        { onTap = toggle_play_pause })
     end
 
     local lyrics_section
     if has_song then
       lyrics_section = column({
         divider(), spacer(6),
-        text("── 歌词 ──", { size = 12, color = "grey", align = "center" }),
+        text("\226\148\128\226\148\128 \230\173\140\232\175\141 \226\148\128\226\148\128", { size = 12, color = "grey", align = "center" }),
         spacer(6),
         text("", { bind = KEYS.lyric_prev, size = 13, color = "grey", align = "center", maxLines = 1, ellipsis = true }),
         spacer(4),
@@ -298,7 +319,7 @@ function player.build(ctx)
     else
       lyrics_section = column({
         divider(), spacer(20),
-        text("暂无歌词", { size = 13, color = "grey", align = "center" }),
+        text("\230\154\130\230\151\160\230\173\140\232\175\141", { size = 13, color = "grey", align = "center" }),
         spacer(20),
       })
     end
@@ -314,26 +335,29 @@ function player.build(ctx)
           text("", { bind = KEYS.album,  size = 14, color = "grey", maxLines = 1, ellipsis = true }),
         }, { main = "center", gap = 8 }),
       }, { gap = 0 })),
-      spacer(12),
-      column({
-        text("", { bind = KEYS.progress_bar, size = 18, color = "primary", align = "center" }),
-        spacer(2),
+      spacer(16),
+      padding(
         row({
-          text("", { bind = KEYS.position, size = 12, color = "grey" }),
-          spacer(),
-          text("", { bind = KEYS.duration, size = 12, color = "grey" }),
+          text("", { bind = KEYS.position, size = 11, color = "grey" }),
+          spacer(6),
+          expanded(slider({
+            value = seek_val,
+            min = 0,
+            max = seek_max,
+            onChanged = function(v) P:seek(v) end,
+          })),
+          spacer(6),
+          text("", { bind = KEYS.duration, size = 11, color = "grey" }),
         }),
-      }, { gap = 0 }),
-      spacer(8),
+        { h = 0, v = 0 }),
+      spacer(4),
       row({
-        iconbutton("skip_previous", prev_song, { tooltip = "上一首", color = "grey" }),
+        iconbutton("skip_previous", prev_song, { tooltip = "\228\184\138\228\184\128\233\166\150", color = "grey" }),
         spacer(20),
         play_pause_btn,
         spacer(20),
-        iconbutton("skip_next", next_song, { tooltip = "下一首", color = "grey" }),
+        iconbutton("skip_next", next_song, { tooltip = "\228\184\139\228\184\128\233\166\150", color = "grey" }),
       }, { main = "center" }),
-      spacer(4),
-      text("", { bind = KEYS.status, size = 11, color = "grey", align = "center" }),
       spacer(4),
       lyrics_section,
     }, { gap = 0 })
@@ -342,7 +366,7 @@ function player.build(ctx)
   local top_bar = row({
     iconbutton("folder_open", function()
       host.input({
-        title = "设置音乐目录",
+        title = "\232\174\190\231\189\174\233\159\179\228\185\144\231\155\174\229\189\149",
         hint = "/storage/emulated/0/Music",
         default = music_dir ~= "" and music_dir or "/storage/emulated/0/Music",
       }, function(path)
@@ -352,16 +376,16 @@ function player.build(ctx)
           rescan_and_rebuild()
         end
       end)
-    end, { tooltip = "设置音乐目录" }),
+    end, { tooltip = "\232\174\190\231\189\174\233\159\179\228\185\144\231\155\174\229\189\149" }),
     expanded(column({
-      text("音乐播放器", { size = 18, weight = "bold" }),
+      text("\233\159\179\228\185\144\230\146\173\230\148\190\229\153\168", { size = 18, weight = "bold" }),
       text("", { bind = KEYS.song_count, size = 11, color = "grey" }),
     }, { gap = 0 })),
     function()
       if view_st.get() == "player" then
-        return iconbutton("queue_music", function() view_st.set("playlist") end, { tooltip = "播放列表" })
+        return iconbutton("queue_music", function() view_st.set("playlist") end, { tooltip = "\230\146\173\230\148\190\229\136\151\232\161\168" })
       else
-        return iconbutton("album", function() view_st.set("player") end, { tooltip = "正在播放" })
+        return iconbutton("album", function() view_st.set("player") end, { tooltip = "\230\173\163\229\156\168\230\146\173\230\148\190" })
       end
     end,
   }, { gap = 8 })
@@ -375,9 +399,9 @@ function player.build(ctx)
       spacer(4),
       function()
         if music_dir == "" then
-          return button("设置音乐目录", function()
+          return button("\232\174\190\231\189\174\233\159\179\228\185\144\231\155\174\229\189\149", function()
             host.input({
-              title = "音乐目录路径",
+              title = "\233\159\179\228\185\144\231\155\174\229\189\149\232\183\175\229\190\132",
               hint = "/storage/emulated/0/Music",
               default = "/storage/emulated/0/Music",
             }, function(path)
@@ -387,7 +411,7 @@ function player.build(ctx)
         else
           return row({
             expanded(text(music_dir, { size = 12, color = "grey", maxLines = 1, ellipsis = true })),
-            button("重新扫描", rescan_and_rebuild, { variant = "tonal", icon = "refresh" }),
+            button("\233\135\141\230\150\176\230\137\171\230\143\143", rescan_and_rebuild, { variant = "tonal", icon = "refresh" }),
           })
         end
       end,
@@ -399,6 +423,7 @@ end
 
 function player.dispose()
   if current_index > 0 then P:stop() end
+  P:disableMediaSession()
 end
 
 return player
