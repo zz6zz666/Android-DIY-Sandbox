@@ -35,10 +35,11 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
     private static final String TAG = "LoveMultiManager";
     public static final String CHANNEL = "love_texture_channel";
 
-    private static final int MAX_SLOTS = 8;
+    private static final int MAX_SLOTS = 10;
     private static final Class<?>[] SLOT_CLASSES = {
         LoveService0.class, LoveService1.class, LoveService2.class, LoveService3.class,
-        LoveService4.class, LoveService5.class, LoveService6.class, LoveService7.class
+        LoveService4.class, LoveService5.class, LoveService6.class, LoveService7.class,
+        LoveService8.class, LoveService9.class
     };
 
     private final Activity activity;
@@ -131,6 +132,17 @@ public class LoveMultiManager implements MethodChannel.MethodCallHandler {
                     int keycode = argInt(call, "keycode", 0);
                     boolean down = Boolean.TRUE.equals(call.argument("down"));
                     callBinder(slot.binder, binder -> binder.key(keycode, down));
+                }
+                result.success(null);
+                break;
+            }
+            case "textInput": {
+                Slot slot = slots[cid];
+                if (slot != null && slot.binder != null) {
+                    String text = call.argument("text");
+                    if (text != null && !text.isEmpty()) {
+                        callBinder(slot.binder, binder -> binder.textInput(text));
+                    }
                 }
                 result.success(null);
                 break;

@@ -151,4 +151,12 @@ public class LoveHost {
         }
         SDLActivity.onNativeKeyUp(keycode);
     }
+
+    /** Forward text input from Flutter keyboard into SDL's text input system. */
+    public static void textInput(String text) {
+        if (!sBooted || text == null || text.isEmpty()) {
+            return;
+        }
+        SDLInputConnection.nativeCommitText(text, 0);
+    }
 }

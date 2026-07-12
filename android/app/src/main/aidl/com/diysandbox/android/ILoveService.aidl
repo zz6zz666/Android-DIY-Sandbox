@@ -11,5 +11,6 @@ interface ILoveService {
     void resumeGame(in Surface surface);
     oneway void touch(int id, int action, float x, float y, float p);
     oneway void key(int keycode, boolean down);
+    oneway void textInput(String text);
     void stop();
 }

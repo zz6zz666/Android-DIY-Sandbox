@@ -92,6 +92,11 @@ public abstract class LoveService extends Service {
         }
 
         @Override
+        public void textInput(String text) {
+            LoveHost.textInput(text);
+        }
+
+        @Override
         public void stop() {
             // SDL cannot be torn down cleanly in-process; stop the whole process.
             main.post(() -> {

@@ -1079,6 +1079,23 @@ app.page("games", function()
           expanded(love{ id = 5, game = SCRIPTS .. "/games/syscheck", keepalive = false }),
         }, { fill = true, gap = 10 }),
       },
+      {
+        title = "输入", icon = "keyboard",
+        content = column({
+          card({ text("文字输入测试", { weight = "bold" }),
+            text("在画布上聚焦后直接用键盘/输入法打字，实时回显 + 事件记录。", { size = 12, color = "grey" }) }),
+          expanded(love{ id = 8, game = SCRIPTS .. "/games/text_input", keepalive = false, ime = true }),
+        }, { fill = true, gap = 10 }),
+      },
+      {
+        title = "线程", icon = "memory",
+        content = column({
+          card({ text("多线程测试", { weight = "bold" }),
+            text("3 个 worker 线程并行: 计数器、素数搜索、斐波那契。通过 Channel 把结果推回主线程实时显示。",
+              { size = 12, color = "grey" }) }),
+          expanded(love{ id = 9, game = SCRIPTS .. "/games/thread_demo", keepalive = false }),
+        }, { fill = true, gap = 10 }),
+      },
     },
   })
 end)

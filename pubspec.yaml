@@ -92,6 +92,12 @@ flutter:
     - assets/scripts/games/physics/conf.lua
     - assets/scripts/games/multitouch/
     - assets/scripts/games/multitouch/main.lua
+    - assets/scripts/games/text_input/
+    - assets/scripts/games/text_input/main.lua
+    - assets/scripts/games/text_input/conf.lua
+    - assets/scripts/games/thread_demo/
+    - assets/scripts/games/thread_demo/main.lua
+    - assets/scripts/games/thread_demo/conf.lua
 
 flutter_intl:
   enabled: true

@@ -7,6 +7,7 @@ local testIdx = 0
 local beepSrc = nil
 local saveTestFile = nil
 local lastKey = ""
+local lastText = ""
 
 local function report(name, ok, detail)
   testIdx = testIdx + 1
@@ -189,6 +190,144 @@ function love.load()
   end)
   report("love.graphics.newFont", ok, ok and "size=16 created" or tostring(err))
 
+  -- Image: ImageData:getPixel + getDimensions
+  ok, err = pcall(function()
+    local id = love.image.newImageData(4, 4)
+    id:setPixel(1, 2, 255, 128, 64, 255)
+    local r, g, b, a = id:getPixel(1, 2)
+    if r ~= 255 or g ~= 128 or b ~= 64 or a ~= 255 then
+      error(string.format("got (%d,%d,%d,%d)", r, g, b, a))
+    end
+    local iw = id:getWidth()
+    local ih = id:getHeight()
+    if iw ~= 4 or ih ~= 4 then error("dims " .. iw .. "x" .. ih) end
+  end)
+  report("ImageData:getPixel+getDim", ok, ok and "pixel (255,128,64) OK" or tostring(err))
+
+  -- Image: ImageData:paste
+  ok, err = pcall(function()
+    local src = love.image.newImageData(2, 2)
+    src:setPixel(0, 0, 255, 0, 0, 255)
+    local dst = love.image.newImageData(4, 4)
+    dst:paste(src, 1, 1)
+    local r = {dst:getPixel(1, 1)}
+    if r[1] ~= 255 then error("paste pixel mismatch") end
+  end)
+  report("ImageData:paste", ok, ok and "2x2→4x4 OK" or tostring(err))
+
+  -- Image: ImageData:mapPixel
+  ok, err = pcall(function()
+    local id = love.image.newImageData(4, 4)
+    id:mapPixel(function(x, y, r, g, b, a)
+      return r, g, b, 128
+    end)
+    local _, _, _, a = id:getPixel(1, 1)
+    if a ~= 128 then error("mapPixel alpha not 128") end
+  end)
+  report("ImageData:mapPixel", ok, ok and "alpha→128 OK" or tostring(err))
+
+  -- Image: encode multiple formats
+  ok, err = pcall(function()
+    local id = love.image.newImageData(2, 2)
+    local tga = id:encode("tga")
+    if not tga or tga == "" then error("tga empty") end
+    local bmp = id:encode("bmp")
+    if not bmp or bmp == "" then error("bmp empty") end
+  end)
+  report("ImageData:encode(tga,bmp)", ok, ok and "TGA+BMP OK" or tostring(err))
+
+  -- Image: newImageData from file (PNG → ImageData, not via graphics)
+  ok, err = pcall(function()
+    local fd = love.image.newImageData("_test_image.png")
+    if not fd then error("nil ImageData") end
+    local iw, ih = fd:getDimensions()
+    if iw ~= 32 or ih ~= 32 then error("size " .. iw .. "x" .. ih) end
+  end)
+  report("love.image.newImageData(file)", ok, ok and "PNG→ImageData 32x32 OK" or tostring(err))
+
+  -- Image: Canvas:newImageData (render-to-texture readback)
+  ok, err = pcall(function()
+    local c = love.graphics.newCanvas(32, 32)
+    love.graphics.setCanvas(c)
+    love.graphics.clear(1, 0, 0)
+    love.graphics.setCanvas()
+    local id = c:newImageData()
+    local r = {id:getPixel(0, 0)}
+    if r[1] ~= 255 or r[2] ~= 0 or r[3] ~= 0 then
+      error(string.format("canvas pixel (%d,%d,%d)", r[1], r[2], r[3]))
+    end
+    c:release()
+  end)
+  report("Canvas:newImageData", ok, ok and "red pixel readback OK" or tostring(err))
+
+  -- Text input: callback registration (love.textinput fires on IME/flutter text)
+  ok, err = pcall(function()
+    if type(love.textinput) ~= "function" then error("love.textinput not a function") end
+    -- Register a handler that will be called when text arrives
+  end)
+  report("love.textinput (callback)", ok, ok and "function exists" or tostring(err))
+
+  -- Joystick: module existence + api probe
+  ok, err = pcall(function()
+    if not love.joystick then error("love.joystick is nil") end
+  end)
+  report("love.joystick module", ok, ok and "loaded" or tostring(err))
+
+  if ok then
+    ok, err = pcall(function()
+      local j = love.joystick.getJoysticks()
+      -- Empty on devices without gamepad; the API call itself should succeed
+    end)
+    report("love.joystick.getJoysticks", ok, ok and ("count=" .. #(love.joystick.getJoysticks() or {})) or tostring(err))
+  end
+
+  -- Joystick callbacks: register handlers that fire when a device connects
+  ok, err = pcall(function()
+    local sentinel = false
+    love.joystickadded = function(joystick) sentinel = true end
+    love.joystickremoved = function(joystick) sentinel = true end
+    love.joystickpressed = function(joystick, button) sentinel = true end
+    love.joystickreleased = function(joystick, button) sentinel = true end
+    love.joystickaxis = function(joystick, axis, value) sentinel = true end
+    love.joystickhat = function(joystick, hat, direction) sentinel = true end
+    if type(love.joystickadded) ~= "function" then error("callback not set") end
+  end)
+  report("love.joystick* callbacks", ok, ok and "6 handlers registered" or tostring(err))
+
+  -- Gamepad callbacks (modern gamepad API, maps gamepad buttons to standard SDL layout)
+  ok, err = pcall(function()
+    love.gamepadpressed = function(joystick, button) end
+    love.gamepadreleased = function(joystick, button) end
+    love.gamepadaxis = function(joystick, axis, value) end
+    if type(love.gamepadpressed) ~= "function" then error("callback not set") end
+  end)
+  report("love.gamepad* callbacks", ok, ok and "3 handlers registered" or tostring(err))
+
+  -- Thread: probe love.thread module (may not be compiled in)
+  ok, err = pcall(function()
+    if not love.thread then error("love.thread not loaded") end
+  end)
+  report("love.thread module", ok, ok and "loaded" or tostring(err))
+
+  if ok then
+    ok, err = pcall(function()
+      local t = love.thread.newThread([[
+        local count = 0
+        for i = 1, 1000000 do count = count + 1 end
+        return count
+      ]])
+      if not t then error("newThread returned nil") end
+      t:start()
+      t:wait()
+      local result = t:getError()
+      t:release()
+      if result and #result > 0 then
+        error("thread error: " .. result)
+      end
+    end)
+    report("love.thread.newThread", ok, ok and "created+ran+released" or tostring(err))
+  end
+
   -- love.draw is tested implicitly
   report("love.draw", true)
 end
@@ -231,10 +370,13 @@ function love.draw()
 
   -- 底部提示
   love.graphics.setColor(1, 1, 0.6)
-  love.graphics.print("Tap screen to play 440Hz beep (test audio)", 12, h - 42)
-  love.graphics.print("Print log piped to app LuaLog console", 12, h - 28)
+  love.graphics.print("Tap screen to play 440Hz beep (test audio)", 12, h - 56)
+  love.graphics.print("Print log piped to app LuaLog console", 12, h - 42)
   if #lastKey > 0 then
-    love.graphics.print("Last key: " .. lastKey, 12, h - 14)
+    love.graphics.print("Last key: " .. lastKey, 12, h - 28)
+  end
+  if #lastText > 0 then
+    love.graphics.print("Last text: " .. lastText, 12, h - 14)
   end
 end
 
@@ -255,4 +397,9 @@ end
 function love.keypressed(key, scancode, isrepeat)
   lastKey = key
   report("love.keypressed", true, "key=" .. tostring(key))
+end
+
+function love.textinput(text)
+  lastText = text
+  print("[syscheck] textinput: " .. text)
 end

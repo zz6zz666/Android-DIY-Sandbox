@@ -154,6 +154,7 @@ class _MainPageState extends State<MainPage> {
       () => BubbleBackground(
         imagePath: homeController.homeBackgroundPath.value,
         child: Scaffold(
+          resizeToAvoidBottomInset: false,
           backgroundColor: Colors.transparent,
           body: _showSettings ? _buildSettingsPage() : _buildMainTabs(),
           bottomNavigationBar: _showSettings ? null : _buildBottomNav(context),

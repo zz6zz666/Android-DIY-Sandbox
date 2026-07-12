@@ -1485,6 +1485,11 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
 
         @Override
         public void run() {
+            if (mLayout == null) {
+                // Embed/texture mode: no activity layout to host the IME input view.
+                // Text input must be provided externally (Flutter keyboard → nativeCommitText).
+                return;
+            }
             RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(w, h + HEIGHT_PADDING);
             params.leftMargin = x;
             params.topMargin = y;

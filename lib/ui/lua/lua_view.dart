@@ -716,6 +716,7 @@ class LuaRenderer {
             autoSuspend: node['autopause'] != false,
             keepAlive: node['keepalive'] != false,
             quarterTurns: quarterTurns,
+            enableIme: node['ime'] == true,
           ),
         );
 

@@ -34,6 +34,7 @@ class LoveGameView extends StatefulWidget {
     this.autoSuspend = true,
     this.keepAlive = true,
     this.quarterTurns = 0,
+    this.enableIme = false,
   });
 
   /// Stable identity of this canvas (0..3). Each distinct id runs in its own
@@ -62,6 +63,10 @@ class LoveGameView extends StatefulWidget {
   /// with touch input transformed to match. 1 = clockwise, 3 = counter-clockwise.
   final int quarterTurns;
 
+  /// When true, tapping the canvas opens the soft keyboard for text input
+  /// and IME keystrokes are forwarded to the love game via `love.textinput`.
+  final bool enableIme;
+
   @override
   State<LoveGameView> createState() => _LoveGameViewState();
 }
@@ -77,6 +82,9 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
   bool _appResumed = true;
   bool _pageActive = true;
 
+  final FocusNode _imeFocus = FocusNode();
+  final TextEditingController _imeController = TextEditingController();
+
   bool get _shouldRun => (!widget.autoSuspend) || (_pageActive && _appResumed);
 
   @override
@@ -84,6 +92,25 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     RawKeyboard.instance.addListener(_handleKey);
+    if (widget.enableIme) {
+      _imeController.addListener(_onImeChanged);
+    }
+  }
+
+  void _onImeChanged() {
+    final text = _imeController.text;
+    if (text.isNotEmpty) {
+      _sendTextInput(text);
+      _imeController.clear();
+    }
+  }
+
+  void _showIme() {
+    if (!widget.enableIme) return;
+    _imeFocus.unfocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _imeFocus.requestFocus();
+    });
   }
 
   @override
@@ -157,6 +184,9 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     RawKeyboard.instance.removeListener(_handleKey);
+    _imeController.removeListener(_onImeChanged);
+    _imeController.dispose();
+    _imeFocus.dispose();
     if (widget.keepAlive) {
       // Keep the engine alive; just stop rendering (state preserved on re-mount).
       _channel.invokeMethod('pause', {'canvasId': widget.canvasId});
@@ -176,12 +206,26 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
     });
   }
 
+  void _sendTextInput(String text) {
+    if (!_running || text.isEmpty) return;
+    _channel.invokeMethod('textInput', {
+      'canvasId': widget.canvasId,
+      'text': text,
+    });
+  }
+
   void _handleKey(RawKeyEvent event) {
     if (!_running) return;
     final data = event.data;
     if (data is RawKeyEventDataAndroid) {
       final down = event is RawKeyDownEvent;
       _sendKey(data.keyCode, down);
+      if (down && event.character != null && event.character!.isNotEmpty) {
+        // Only send text input for printable characters (not control chars like backspace).
+        if (event.character!.codeUnits.every((c) => c >= 0x20)) {
+          _sendTextInput(event.character!);
+        }
+      }
     }
   }
 
@@ -217,7 +261,7 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final dpr = MediaQuery.of(context).devicePixelRatio;
     final bool rotated = widget.quarterTurns == 1 || widget.quarterTurns == 3;
-    return LayoutBuilder(
+    Widget result = LayoutBuilder(
       builder: (context, constraints) {
         _logW = constraints.maxWidth;
         _logH = constraints.maxHeight;
@@ -243,15 +287,39 @@ class _LoveGameViewState extends State<LoveGameView> with WidgetsBindingObserver
         if (rotated) {
           tex = RotatedBox(quarterTurns: widget.quarterTurns, child: tex);
         }
-        return Listener(
+        final content = Listener(
           behavior: HitTestBehavior.opaque,
-          onPointerDown: (e) => _sendTouch(0, e.localPosition, e.pointer), // ACTION_DOWN
+          onPointerDown: (e) {
+            _sendTouch(0, e.localPosition, e.pointer); // ACTION_DOWN
+            if (widget.enableIme) _showIme();
+          },
           onPointerMove: (e) => _sendTouch(2, e.localPosition, e.pointer), // ACTION_MOVE
           onPointerUp: (e) => _sendTouch(1, e.localPosition, e.pointer), // ACTION_UP
           onPointerCancel: (e) => _sendTouch(3, e.localPosition, e.pointer), // ACTION_CANCEL
           child: tex,
         );
+
+        if (!widget.enableIme) return content;
+
+        return Stack(
+          children: [
+            content,
+            Positioned(
+              left: 0, bottom: 0, width: 1, height: 1,
+              child: Opacity(
+                opacity: 0,
+                child: TextField(
+                  focusNode: _imeFocus,
+                  controller: _imeController,
+                  enableInteractiveSelection: false,
+                  showCursor: false,
+                ),
+              ),
+            ),
+          ],
+        );
       },
     );
+    return result;
   }
 }
