@@ -1049,7 +1049,7 @@ app.page("games", function()
                 }),
               }, { cross = "center" }),
             }),
-            expanded(love{ id = 2, game = SCRIPTS .. "/games/bounce", rotate = dir.get() }),
+            expanded(love{ id = 2, game = SCRIPTS .. "/games/bounce", rotate = dir.get(), keepalive = false }),
           }, { fill = true, gap = 10 })
         end)(),
       },

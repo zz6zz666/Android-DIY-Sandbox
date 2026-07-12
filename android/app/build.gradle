@@ -69,6 +69,7 @@ android {
             signingConfig hasKeystoreFile ? signingConfigs.release : signingConfigs.debug
             minifyEnabled true
             shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // 禁用对特定原生库的strip操作，避免处理错误
             packagingOptions {
                 doNotStrip '**/libsudo.so'
