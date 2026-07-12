@@ -160,17 +160,19 @@ local M = {}
 
 local host, port, token = "127.0.0.1", nil, ""
 local freeze = false        -- 挂起时冻结游戏时钟(回来从快照继续), 由 --astrbridge 第三段决定
--- 从 love 注入的参数里取连接信息:--astrbridge=PORT:TOKEN[:FREEZE]
+local rotate = nil          -- 画布旋转: "cw"/"ccw", 用于传感器坐标重映射
+-- 从 love 注入的参数里取连接信息:--astrbridge=PORT:TOKEN[:FREEZE[:ROTATE]]
 do
   local function scan(t)
     if type(t) ~= "table" then return end
     for _, v in pairs(t) do
       local m = tostring(v):match("^%-%-astrbridge=(.+)$")
       if m then
-        local p, tk, fz = m:match("^(%d+):([^:]*):?(%d*)$")
+        local p, tk, fz, rot = m:match("^(%d+):([^:]*):?(%d*):?(.*)$")
         if p then
           port = tonumber(p); token = tk or ""
           freeze = (fz == "1")
+          rotate = (rot == "cw" or rot == "ccw") and rot or nil
         end
       end
     end
@@ -193,6 +195,18 @@ end
 
 local function dispatch(msg)
   if type(msg) ~= "table" then return end
+  -- 传感器坐标重映射 (画布旋转时)
+  if rotate then
+    local t = msg.type
+    if (t == "sensor_accel" or t == "sensor_gyro") and type(msg.data) == "table" then
+      local ax, ay, az = msg.data.x or 0, msg.data.y or 0, msg.data.z or 0
+      if rotate == "cw" then
+        msg.data = {x = ay, y = -ax, z = az}
+      elseif rotate == "ccw" then
+        msg.data = {x = -ay, y = ax, z = az}
+      end
+    end
+  end
   local t = msg.type
   if t and handlers[t] then
     for _, fn in ipairs(handlers[t]) do
@@ -419,5 +433,38 @@ do
     end
   end
 end
+
+-- CJK 字体回退
+do
+  local _cjkSetup = false
+  local _baseRun = love.run
+  love.run = function()
+    local loop = _baseRun()
+    if type(loop) == "function" then
+      return function()
+        if not _cjkSetup then
+          _cjkSetup = true
+          pcall(function()
+            local info = love.filesystem.getInfo("cjk_font.ttf")
+            if info then
+              local cjk = love.graphics.newFont("cjk_font.ttf", 14)
+              local default = love.graphics.getFont()
+              if default and cjk then
+                default:setFallbacks(cjk)
+                M.emit("log", "[love info] CJK fallback font loaded")
+              end
+            end
+          end)
+        end
+        return loop()
+      end
+    end
+    return loop
+  end
+end
+
+-- 传感器桥接
+function M.sensor_start(opts) return M.emit("sensor_start", opts or {}) end
+function M.sensor_stop()    return M.emit("sensor_stop", {}) end
 
 return M

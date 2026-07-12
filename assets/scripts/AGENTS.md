@@ -222,7 +222,7 @@ app.actions({
 | `toggle({title,value,onChanged})`                                  | 开关                                           |
 | `checkbox({title,value,onChanged})`                                | 复选                                           |
 | `radio({title,value,options,axis,onChanged})`                      | 单选组;`onChanged(v)`                        |
-| `slider({value,min,max,onChanged})`                                | 滑块                                           |
+| `slider({value,min,max,onChanged,bind})`                                | 滑块。`bind="reactiveKey"` 跟随外部值实时移动                                       |
 | `rangeslider({min,max,low,high,onChanged})`                        | 区间滑块;`onChanged(lo,hi)`                  |
 | `select({title,value,options,onChanged})`                          | 下拉;options:`{{label,value},...}`           |
 | `segmented({value,options,onChanged})`                             | 分段单选                                       |
@@ -291,7 +291,7 @@ love{ id = 0, game = SCRIPTS.."/games/mygame" }
 
 | 属性                 | 说明                                                                                                                  |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `id`               | 画布标识**0..3,必须唯一**。每个 id 是一块独立实例(独立进程),同屏多块须各用不同 id                               |
+| `id`               | 画布标识**0..9,必须唯一**。每个 id 是一块独立实例(独立进程),同屏多块须各用不同 id                               |
 | `game`             | love2d 工程目录绝对路径(内含`main.lua`)                                                                             |
 | `width`/`height` | 尺寸;作为普通元素时 height 默认 200                                                                                   |
 | `autopause`        | 默认`true`:切走导航页自动挂起(停渲染、留内存、不丢状态)                                                             |
@@ -299,6 +299,7 @@ love{ id = 0, game = SCRIPTS.."/games/mygame" }
 | `freeze`           | 默认`false`:挂起时按真实时间推进(回来追补流逝);`true` 冻结游戏时钟、回来从快照续(游戏需 `require("love_host")`) |
 | `rotate`           | 横屏游戏:`"cw"` 顺时针 / `"ccw"` 逆时针 强制旋转 90° 渲染(引擎按横屏渲染,触摸同步换算);省略=不旋转。主框架仍竖屏,玩家把手机转 90° 即可横屏游玩 |
 | `onEvent`          | `function(msg)`:收到游戏发来的消息(表)时回调(见下「双向通信」)                                                      |
+| `ime`              | 默认`false`:`true` 时画布支持软键盘输入,点击画布弹出系统键盘,IME 输入自动转为 `love.textinput` 事件            |
 
 `game` 指向一个标准 love2d 工程,`main.lua` 里实现 love 回调(触摸已从 Flutter 转发):
 
@@ -1052,4 +1053,143 @@ player:disableMediaSession()
 ```
 
 > `dispose()` 会自动 release media session,无需手动调 `disableMediaSession()`。`sandbox/audio_player.lua:208`。
+
+---
+
+## 十八、LOVE 引擎能力
+
+### 文字输入 (IME)
+
+画布设 `ime = true` 后,点击弹出系统软键盘,IME 输入自动转为 `love.textinput(text)` 事件:
+
+```lua
+love{ id = 0, game = SCRIPTS.."/games/mygame", ime = true }
+
+-- 游戏侧:
+function love.textinput(text)
+  -- text 为用户输入的文本 (单字符或 IME 组合提交)
+end
+function love.keypressed(key)
+  -- backspace / enter 等控制键仍走 keypressed
+end
+```
+
+Flutter 键盘事件同样桥接:物理键盘按下自动产生 `love.textinput` + `love.keypressed`。
+
+### CJK 中文渲染
+
+`require("love_host")` 的游戏**自动获得中文回退字体**。引擎启动时从系统拷贝 CJK 字体
+(`/system/fonts/HYQiHei_60S.ttf` 等) 到游戏 save 目录,`love.draw` 的第一帧自动设为
+默认字体回退 (`setFallbacks`)。`love.graphics.print("中文")` 直接可用,无需游戏做任何处理。
+
+### love.thread (多线程)
+
+与 `coroutine` 的区别:thread 跑在**独立的 Lua state + OS 线程**上,能真正利用多核 CPU,
+但 thread 间不能直接共享变量,只能通过 `Channel` 传消息。`newThread` 接受文件路径,不能传内联代码字符串:
+
+```lua
+-- 主线程 (conf.lua 需开启 t.modules.thread = true)
+love.filesystem.write("_worker.lua", [[
+  local ch = love.thread.getChannel("work")
+  for i = 1, 10000000 do end          -- 重计算不阻塞主循环
+  ch:push({ done = true })
+]])
+local channel = love.thread.getChannel("work")
+local t = love.thread.newThread("_worker.lua")
+t:start()
+
+-- love.update 中轮询:
+local msg = channel:pop()
+if msg and msg.done then
+  t:release()
+end
+```
+
+### love.data (哈希/编码/压缩)
+
+`conf.lua` 中 `t.modules.data = true` 开启。
+
+```lua
+love.data.hash("md5", "hello")                    -- "5d41402abc4b2a76b9719d911017c592"
+love.data.hash("sha256", "hello")                 -- SHA256 摘要
+
+love.data.encode("string", "hex", "AB")           -- "4142"
+love.data.decode("string", "hex", "4142")         -- "AB"
+
+love.data.pack("string", "z", "hello")            -- "\0"结尾字符串
+love.data.unpack("z", packed)                     -- 解包为 "hello"
+
+love.data.compress("string", "lz4", input)        -- LZ4 压缩 (也可 "zlib"/"gzip")
+love.data.decompress("string", "lz4", compressed) -- 解压
+```
+
+> LOVE 12 的 `data.*` 第一个参数统一为 containerType: `"string"` 返回 Lua 字符串,`"data"` 返回 Data 对象。
+
+### LOVE 层网络 (LuaSocket)
+
+游戏内可直接 `require("socket")` 使用 LuaSocket (已编译进 `libluajit-love.so`):
+
+```lua
+-- TCP (love_host 桥自身也在用)
+local socket = require("socket")
+local c = socket.tcp()
+c:connect("example.com", 80)
+c:send("GET / HTTP/1.0\r\n\r\n")
+local resp = c:receive("*a")
+c:close()
+
+-- HTTP 快捷方式
+local http = require("socket.http")
+local body, code = http.request("http://httpbin.org/status/200")
+if code == 200 then ... end
+```
+
+> 此 LuaSocket 与 UI 层的 `host.http{}` 互不相通(不同进程)。游戏需网络时用这里,无需经由 Dart 中转。
+
+### 传感器 (加速度计/陀螺仪)
+
+游戏通过 `host.sensor_start` 打开手机传感器,`host.on` 接收数据。画布旋转 (`rotate="cw"/"ccw"`)
+时传感器坐标自动重映射以匹配游戏坐标系,游戏无需处理:
+
+```lua
+local host = require("love_host")
+
+host.sensor_start({ accel = true, gyro = true })
+
+host.on("sensor_accel", function(d)
+  -- d.x, d.y, d.z: 加速度 m/s² (含重力)
+  -- 倾斜手机滚动小球:
+  ball.vx = ball.vx + d.x * dt * 300
+  ball.vy = ball.vy + d.y * dt * 300
+end)
+
+host.on("sensor_gyro", function(d)
+  -- d.x, d.y, d.z: 角速度 rad/s (不含重力)
+end)
+
+-- 关闭传感器
+host.sensor_stop()
+```
+
+### love.joystick / gamepad
+
+蓝牙/USB 手柄支持。无实物手柄时 `love.joystick.getJoysticks()` 返回空表,
+不影响游戏运行。回调仅在设备连接/断开时触发:
+
+```lua
+function love.joystickadded(joystick) end
+function love.joystickpressed(joystick, button) end
+function love.joystickaxis(joystick, axis, value) end
+-- 现代手柄映射 (标准 SDL 布局):
+function love.gamepadpressed(joystick, button) end
+function love.gamepadaxis(joystick, axis, value) end
+```
+
+> `t.modules.joystick = true` 需在 `conf.lua` 中显式开启。
+
+### 画布槽位
+
+每个 `love{}` 的 `id` 必须在 0..9 范围内 (共 10 个槽位)。id 7 被 headless 音频引擎保留,
+用户画布可用 0..6 和 8..9。每个槽位对应一个独立的 Android 进程 (`:love0` ~ `:love9`),
+互不干扰。
 

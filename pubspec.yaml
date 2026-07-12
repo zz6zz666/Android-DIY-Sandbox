@@ -27,6 +27,7 @@ dependencies:
   webview_flutter: ^4.10.0
   webview_flutter_android: ^4.10.0
   permission_handler: ^11.3.1
+  sensors_plus: ^6.1.1
   http: ^1.2.2
   url_launcher: ^6.3.1
   file_picker: ^11.0.2
@@ -98,6 +99,8 @@ flutter:
     - assets/scripts/games/thread_demo/
     - assets/scripts/games/thread_demo/main.lua
     - assets/scripts/games/thread_demo/conf.lua
+    - assets/scripts/games/sensor_demo/
+    - assets/scripts/games/sensor_demo/main.lua
 
 flutter_intl:
   enabled: true

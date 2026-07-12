@@ -22,7 +22,8 @@ end
 local KEYS = {
   title   = "online.title",  artists = "online.artists",
   album   = "online.album",  position = "online.position",
-  duration = "online.duration",
+  position_val = "online.position_val",
+  duration = "online.duration", duration_val = "online.duration_val",
   lyric_text = "online.lyric_text",
   lyric_prev = "online.lyric_prev", lyric_next = "online.lyric_next",
   playing = "online.playing", art_url = "online.art_url",
@@ -37,6 +38,7 @@ end
 -- Progress/lyrics + page rebuild
 -- ============================================================
 local _rebuild = nil
+local _ended = false
 
 P:on("state", function(data)
   local pos = data.position or 0
@@ -44,8 +46,10 @@ P:on("state", function(data)
   if dur > 0 and dur ~= current_duration then
     current_duration = dur
     R(KEYS.duration).set(fmt_time(dur))
+    R(KEYS.duration_val).set(dur)
   end
   R(KEYS.position).set(fmt_time(pos))
+  R(KEYS.position_val).set(pos)
   R(KEYS.playing).set(data.playing == true)
   if lyrics and #lyrics > 0 then
     local idx = lrc.find_index(lyrics, pos)
@@ -65,11 +69,11 @@ local function push_playing(v)
   R(KEYS.playing).set(v)
 end
 
-P:on("started", function() push_playing(true);  P:updateMediaSession({ state = "playing" }); on_state_change() end)
+P:on("started", function() push_playing(true); _ended=false; P:updateMediaSession({ state = "playing" }); on_state_change() end)
 P:on("paused",  function() push_playing(false); P:updateMediaSession({ state = "paused" });  on_state_change() end)
 P:on("resumed", function() push_playing(true);  P:updateMediaSession({ state = "playing" }); on_state_change() end)
-P:on("stopped", function() push_playing(false); R(KEYS.position).set(fmt_time(0)); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
-P:on("ended",   function() push_playing(false); R(KEYS.position).set(fmt_time(0)); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
+P:on("stopped", function() _ended=true; push_playing(false); R(KEYS.position).set(fmt_time(0)); R(KEYS.position_val).set(0); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
+P:on("ended",   function() _ended=true; push_playing(false); R(KEYS.position).set(fmt_time(0)); R(KEYS.position_val).set(0); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
 P:on("error",   function(msg) on_state_change() end)
 
 -- System media buttons
@@ -77,6 +81,7 @@ P:onMediaButton(function(action, position)
   if action == "play" then
     if current_song then
       if P.playing then -- already playing, nothing to do
+      elseif _ended then _ended = false; play_online_song(current_song)
       else P:resume() end
     end
   elseif action == "pause" then P:pause()
@@ -89,6 +94,7 @@ end)
 
 local function play_online_song(song)
   if not song then return end
+  _ended = false
   P:stop()
 
   current_song = song
@@ -124,7 +130,9 @@ end
 
 local function toggle_play_pause()
   if not current_song then host.toast("Please search first"); return end
-  if P.playing then P:pause() else P:resume() end
+  if P.playing then P:pause()
+  elseif _ended then _ended = false; play_online_song(current_song)
+  else P:resume() end
 end
 
 local function do_search(keyword)
@@ -153,7 +161,9 @@ function online.build(ctx)
   R(KEYS.artists, "")
   R(KEYS.album, "")
   R(KEYS.position, "00:00")
+  R(KEYS.position_val, 0)
   R(KEYS.duration, "00:00")
+  R(KEYS.duration_val, 0)
   R(KEYS.lyric_text, "")
   R(KEYS.lyric_prev, "")
   R(KEYS.lyric_next, "")
@@ -170,7 +180,6 @@ function online.build(ctx)
   local r_art_url = R(KEYS.art_url)
 
   local seek_max = (P.duration > 0 and P.duration) or (current_duration > 0 and current_duration) or 1
-  local seek_val = P.position or 0
 
   local function build_results()
     local items = {}
@@ -237,7 +246,7 @@ function online.build(ctx)
           text("", { bind = KEYS.position, size = 11, color = "grey" }),
           spacer(6),
           expanded(slider({
-            value = seek_val,
+            bind = KEYS.position_val,
             min = 0,
             max = seek_max,
             onChanged = function(v) P:seek(v) end,

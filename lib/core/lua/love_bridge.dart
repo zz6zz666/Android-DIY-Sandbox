@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import 'lua_engine.dart';
 import 'lua_log.dart';
+import 'sensor_bridge.dart';
 
 /// .love 归档提取缓存: 记录已解压的归档路径, 避免每次重建都解压。
 final Map<String, String> _extractedLoves = {};
@@ -35,6 +36,7 @@ class LoveBridge {
     String? gamePath,
     required String scriptsDir,
     bool freeze = false,
+    String? rotate,
   }) {
     final c = _canvases.putIfAbsent(canvasId, () {
       final nc = _Canvas(canvasId, _randomToken());
@@ -43,8 +45,10 @@ class LoveBridge {
     });
     c.onEvent = onEvent;
     if (gamePath != null) _dropBridgeModule(gamePath, scriptsDir);
-    // 第三段 freeze 标志: 1=挂起时冻结游戏时钟(回来从快照继续), 0=按真实时间推进。
-    return '--astrbridge=${portOf(canvasId)}:${c.token}:${freeze ? 1 : 0}';
+    // 第三段 freeze 标志。第四段 rotate: "cw"/"ccw" 用于传感器坐标重映射。
+    final fz = freeze ? 1 : 0;
+    final rot = rotate ?? '';
+    return '--astrbridge=${portOf(canvasId)}:${c.token}:$fz:$rot';
   }
 
   /// 更新某画布的事件回调(love{} 重建时调用)。
@@ -199,6 +203,17 @@ class LoveBridge {
         LuaLog.instance.info('[love canvas${c.id}] ${d.isNotEmpty ? d : msg}');
       }
     }
+    if (msg is Map) {
+      final type = msg['type'] as String?;
+      if (type == 'sensor_start') {
+        SensorBridge.instance.start(c.id, Map<String, dynamic>.from(msg['data'] ?? {}));
+        return;
+      }
+      if (type == 'sensor_stop') {
+        SensorBridge.instance.stop(c.id);
+        return;
+      }
+    }
     c.dartHandler?.call(msg);
     final cb = c.onEvent;
     if (cb == null) return;
@@ -225,8 +240,32 @@ class LoveBridge {
       final dest = File('${saveDir.path}/love_host.lua');
       // 总是重新写入 (love_host.lua 随 App 版本更新, 旧版可能缺少修复)
       dest.writeAsStringSync(src);
+      _copySystemFont(saveDir);
     } catch (e) {
       LuaLog.instance.warn('注入 love_host.lua 失败: $e');
+    }
+  }
+
+  void _copySystemFont(Directory saveDir) {
+    final fontPaths = [
+      '/system/fonts/HYQiHei_60S.ttf',
+      '/system/fonts/DroidSansFallback.ttf',
+      '/system/fonts/NotoSansSC-Regular.otf',
+      '/system/fonts/NotoSansHans-Regular.otf',
+      '/system/fonts/NotoSansCJK-Regular.ttc',
+    ];
+    for (final path in fontPaths) {
+      final src = File(path);
+      if (src.existsSync()) {
+        try {
+          final dest = File('${saveDir.path}/cjk_font.ttf');
+          src.copySync(dest.path);
+          LuaLog.instance.info('已注入 CJK 字体: $path (${src.lengthSync()} bytes) → ${dest.path}');
+          return;
+        } catch (e) {
+          LuaLog.instance.warn('复制 CJK 字体失败 ($path): $e');
+        }
+      }
     }
   }
 }
@@ -274,6 +313,7 @@ class LoveAudioManager {
   int _nextListenerId = 1;
 
   bool _started = false;
+  bool _starting = false; // 防并发重入
   String _scriptsDir = '';
 
   // 每个 channel 的最后已知状态
@@ -326,7 +366,8 @@ class LoveAudioManager {
 
   Future<void> ensureStarted(String scriptsDir) async {
     _scriptsDir = scriptsDir;
-    if (_started) return;
+    if (_started || _starting) return;
+    _starting = true;
 
     // Limit cache on startup (keep most recent 50 files)
     _cleanupTempCache(50);
@@ -357,6 +398,7 @@ class LoveAudioManager {
     } catch (e) {
       LuaLog.instance.error('[LoveAudioManager] startHeadless failed: $e');
     }
+    _starting = false;
   }
 
   // --- public API (对应 prelude host.audio_*) ---

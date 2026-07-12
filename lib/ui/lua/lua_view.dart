@@ -703,6 +703,7 @@ class LuaRenderer {
           gamePath: gamePath,
           scriptsDir: ScriptManager.instance.scriptsDir,
           freeze: freeze,
+          rotate: rot.isEmpty ? null : rot,
         );
         return SizedBox(
           key: ValueKey('love_canvas_$canvasId'),
@@ -1337,10 +1338,31 @@ class _LuaSlider extends StatefulWidget {
 
 class _LuaSliderState extends State<_LuaSlider> {
   late double _value;
+  bool _dragging = false;
+  ValueNotifier<Object?>? _bindNotifier;
+
   @override
   void initState() {
     super.initState();
     _value = (widget.props['value'] as num?)?.toDouble() ?? 0;
+    final bind = widget.props['bind'];
+    if (bind is String) {
+      _bindNotifier = ScriptManager.instance.reactiveNotifier(bind);
+      _bindNotifier!.addListener(_onBindUpdate);
+    }
+  }
+
+  void _onBindUpdate() {
+    if (!_dragging && _bindNotifier != null) {
+      final v = _bindNotifier!.value;
+      if (v is num) setState(() => _value = v.toDouble());
+    }
+  }
+
+  @override
+  void dispose() {
+    _bindNotifier?.removeListener(_onBindUpdate);
+    super.dispose();
   }
 
   @override
@@ -1359,8 +1381,10 @@ class _LuaSliderState extends State<_LuaSlider> {
           value: _value.clamp(min, max),
           min: min,
           max: max,
+          onChangeStart: (_) => _dragging = true,
           onChanged: (v) => setState(() => _value = v),
           onChangeEnd: (v) {
+            _dragging = false;
             final fn = widget.props['onChanged'];
             if (fn is LuaFunctionRef) fn.call([v]);
             widget.onAction();

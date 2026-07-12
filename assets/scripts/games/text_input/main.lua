@@ -83,4 +83,6 @@ function love.draw()
   love.graphics.setColor(1, 1, 0.5, 0.6)
   love.graphics.print("Type on keyboard / use IME  |  Backspace deletes  |  Enter = newline", x, y)
   love.graphics.print("Input chars: " .. #input, x, y + 16)
+  love.graphics.setColor(0.6, 0.9, 0.6, 0.7)
+  love.graphics.print("中文输入测试 — CJK font fallback", x, y + 32)
 end

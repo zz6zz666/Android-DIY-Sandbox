@@ -1096,6 +1096,15 @@ app.page("games", function()
           expanded(love{ id = 9, game = SCRIPTS .. "/games/thread_demo", keepalive = false }),
         }, { fill = true, gap = 10 }),
       },
+      {
+        title = "传感器", icon = "sensors",
+        content = column({
+          card({ text("传感器测试", { weight = "bold" }),
+            text("加速度计驱动小球运动，陀螺仪显示方向。点击画面开关传感器。",
+              { size = 12, color = "grey" }) }),
+          expanded(love{ id = 1, game = SCRIPTS .. "/games/sensor_demo", keepalive = false }),
+        }, { fill = true, gap = 10 }),
+      },
     },
   })
 end)

@@ -67,7 +67,9 @@ local KEYS = {
   artist    = "player.artist",
   album     = "player.album",
   position  = "player.position",
+  position_val = "player.position_val",
   duration  = "player.duration",
+  duration_val = "player.duration_val",
   playing   = "player.playing",
   art_path  = "player.art_path",
   lyric_text = "player.lyric_text",
@@ -86,6 +88,7 @@ end
 -- Progress/lyrics + page rebuild
 -- ============================================================
 local _rebuild = nil
+local _ended = false
 
 P:on("state", function(data)
   local pos = data.position or 0
@@ -93,8 +96,10 @@ P:on("state", function(data)
   if dur > 0 and dur ~= current_duration then
     current_duration = dur
     R(KEYS.duration).set(fmt_time(dur))
+    R(KEYS.duration_val).set(dur)
   end
   R(KEYS.position).set(fmt_time(pos))
+  R(KEYS.position_val).set(pos)
   R(KEYS.playing).set(data.playing == true)
   if lyrics and #lyrics > 0 then
     local idx = lrc.find_index(lyrics, pos)
@@ -114,18 +119,20 @@ local function push_playing(v)
   R(KEYS.playing).set(v)
 end
 
-P:on("started", function() push_playing(true);  P:updateMediaSession({ state = "playing" }); on_state_change() end)
+P:on("started", function() push_playing(true); _ended=false; P:updateMediaSession({ state = "playing" }); on_state_change() end)
 P:on("paused",  function() push_playing(false); P:updateMediaSession({ state = "paused" });  on_state_change() end)
 P:on("resumed", function() push_playing(true);  P:updateMediaSession({ state = "playing" }); on_state_change() end)
-P:on("stopped", function() push_playing(false); R(KEYS.position).set(fmt_time(0)); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
-P:on("ended",   function() push_playing(false); R(KEYS.position).set(fmt_time(0)); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
+P:on("stopped", function() _ended=true; push_playing(false); R(KEYS.position).set(fmt_time(0)); R(KEYS.position_val).set(0); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
+P:on("ended",   function() _ended=true; push_playing(false); R(KEYS.position).set(fmt_time(0)); R(KEYS.position_val).set(0); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
 P:on("error",   function(msg) on_state_change() end)
 
 -- System media buttons
 P:onMediaButton(function(action, position)
   if action == "play" then
     if #playlist > 0 then
-      if current_index == 0 then play_index(1) else P:resume() end
+      if current_index == 0 then play_index(1)
+      elseif _ended then _ended = false; P:play(playlist[current_index].path)
+      else P:resume() end
     end
   elseif action == "pause" then P:pause()
   elseif action == "skip_next" then next_song()
@@ -139,6 +146,7 @@ end)
 
 local function play_index(idx)
   if idx < 1 or idx > #playlist then return end
+  _ended = false
   if current_index > 0 then P:stop() end
 
   current_index = idx
@@ -178,7 +186,9 @@ end
 local function toggle_play_pause()
   if #playlist == 0 then host.toast("\232\175\183\229\133\136\230\137\171\230\143\143\233\159\179\228\185\144\231\155\174\229\189\149"); return end
   if current_index == 0 then play_index(1); return end
-  if P.playing then P:pause() else P:resume() end
+  if P.playing then P:pause()
+  elseif _ended then _ended = false; P:play(playlist[current_index].path)
+  else P:resume() end
 end
 
 local function next_song()
@@ -247,7 +257,9 @@ function player.build(ctx)
   local r_art_path  = R(KEYS.art_path, "")
   local r_music_dir = R(KEYS.music_dir, music_dir)
   R(KEYS.position, "00:00")
+  R(KEYS.position_val, 0)
   R(KEYS.duration, "00:00")
+  R(KEYS.duration_val, 0)
   R(KEYS.lyric_text, "")
   R(KEYS.lyric_prev, "")
   R(KEYS.lyric_next, "")
@@ -258,9 +270,8 @@ function player.build(ctx)
 
   local view_st = state("player.view", "player")
 
-  -- seek slider: read from raw properties (updated on rebuild)
+  -- seek slider: max from known duration (updated on song change via rebuild)
   local seek_max = (P.duration > 0 and P.duration) or (current_duration > 0 and current_duration) or 1
-  local seek_val = P.position or 0
 
   local function build_playlist_view()
     local items = {}
@@ -341,7 +352,7 @@ function player.build(ctx)
           text("", { bind = KEYS.position, size = 11, color = "grey" }),
           spacer(6),
           expanded(slider({
-            value = seek_val,
+            bind = KEYS.position_val,
             min = 0,
             max = seek_max,
             onChanged = function(v) P:seek(v) end,
