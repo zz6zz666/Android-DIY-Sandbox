@@ -73,6 +73,7 @@ flutter:
     - assets/scripts/widgets/
     - assets/scripts/apps/
     - assets/scripts/music/
+    - assets/scripts/sandbox/
     - assets/scripts/agent.lua
     - assets/scripts/agent/
     - assets/scripts/agent/main.lua

@@ -11,6 +11,7 @@ scripts/
   main.lua          用户主脚本 (入口, 自由定制: 导航/页面/组件)
   agent/main.lua    Agent 入口 (用户可见可改, 但一般不必动; 独立且受保护地加载)
   agent/sandbox     命令行工具集: reload / ping / run / log (改完脚本触发重载、隔离试跑、看日志)
+  sandbox/          内置库 (audio_player.lua 等, 随引擎维护, 无需用户创建)
   AGENTS.md         本文档
   ...               其余 .lua 模块 / 资源 / love 工程目录, 由你自由组织
 ```
@@ -722,6 +723,185 @@ local t = json.decode(host.read_file(path))   -- 失败返回 nil, err
 t.model = "gpt-4o"
 host.write_file(path, json.encode(t))
 ```
+
+---
+
+## 十五、音频播放引擎
+
+App 内置一个 **headless love2d 音频引擎**,通过 `host.audio_player(name)` 创建播放器实例,
+支持本地文件和 HTTP/HTTPS URL,任意 Lua 脚本都可以用它做 BGM、SFX、音乐播放器等。
+
+### 核心概念
+
+音频引擎单独跑一个无渲染界面的 love2d 进程 (`games/audio_svc`),通过加密 TCP 通道收发命令/事件。
+一个 Player 实例 = 引擎内的一个**声道 (channel)**,不同 channel 可并行播放互不干扰。
+
+```lua
+local bgm = host.audio_player("bgm")
+local sfx = host.audio_player("sfx")
+bgm:play("/sdcard/bgm.mp3", { loop = true })
+sfx:play("/sdcard/shot.wav")
+```
+
+### Player 对象 (推荐)
+
+**创建后立即可用,无需手动 `ensure` 或 `require`——引擎在首个 play 时自动启动。**
+
+```lua
+local p = host.audio_player(name)   -- name 同时也是 channel 名和 reactive key 前缀
+```
+
+#### 播放控制
+
+| 方法                             | 说明                                     |
+| -------------------------------- | ---------------------------------------- |
+| `p:play(path, opts)`            | 播放本地路径或 HTTP URL。opts:`{volume, loop, start_pos}`(均可选) |
+| `p:pause()`                     | 暂停                                     |
+| `p:resume()`                    | 从暂停位恢复                             |
+| `p:stop()`                      | 停止并释放资源                           |
+| `p:seek(pos_sec)`               | 跳转到指定秒数                           |
+| `p:set_volume(v)`               | 设置音量 (0.0 ~ 1.0)                     |
+| `p:set_loop(loop)`              | 设置循环 (`true`/`false`)                |
+
+文件路径支持 `/storage/emulated/0/...`(共享存储)、`http(s)://`(在线),引擎自动处理
+文件复制和下载,脚本无需关心底层 PhysFS 沙盒。
+
+#### 同步属性
+
+| 属性          | 类型    | 说明                     |
+| ------------- | ------- | ------------------------ |
+| `p.playing`   | bool    | 是否正在播放             |
+| `p.position`  | number  | 当前播放位置 (秒)        |
+| `p.duration`  | number  | 总时长 (秒,未知时为 0)   |
+
+#### UI 绑定
+
+Player 自动维护 5 个 `reactive` 键,供 `text{bind=...}` 直接绑定:
+
+```lua
+p:key("position")   -- "name.position"  → 已格式化为 "MM:SS" 字符串
+p:key("duration")   -- "name.duration"  → 已格式化为 "MM:SS"
+p:key("playing")    -- "name.playing"   → bool (用于条件构建按钮)
+p:key("status")     -- "name.status"    → "就绪"/"加载中…"/"正在播放"/"已暂停"/"已停止"/"错误: …"
+p:key("error")      -- "name.error"     → 错误描述字符串
+```
+
+#### 自定义事件
+
+Player 会自动处理 state 更新,如需额外处理(进度条渲染、歌词同步),用 `on_event`:
+
+```lua
+p:on_event(function(evttype, data)
+  if evttype == "state" then
+    -- data = { playing, position, duration, channel }
+    local pos = tonumber(data.position) or 0
+    -- 更新自定义 reactive 或直接操作 UI
+  end
+end)
+```
+
+事件类型: `"started"`, `"paused"`, `"resumed"`, `"stopped"`, `"ended"`, `"error"`, `"state"`。
+
+#### 生命周期
+
+```lua
+p:on_event(fn)      -- 注册事件回调
+p:off_event(fn)     -- 注销 (传递注册时的函数引用)
+p:dispose()         -- 注销所有事件 + stop + 释放监听器; 离开页面前调用
+```
+
+#### 完整示例: 简单播放器
+
+```lua
+app.page("player", function()
+  local P = host.audio_player("demo")
+  local _rebuild = state("demo.rebuild", 0)  -- 按钮更新需要 state 驱动重建
+
+  P:on_event(function(evttype, data)
+    if evttype ~= "state" then _rebuild.set(_rebuild.get() + 1) end
+  end)
+
+  return column({
+    row({
+      iconbutton("folder_open", function()
+        host.input({ title = "音频文件路径", hint = "/sdcard/Music/song.mp3" },
+          function(path) if path and path ~= "" then P:play(path) end end)
+      end, { tooltip = "打开文件" }),
+      spacer(),
+      function()
+        if P.playing then
+          return iconbutton("pause", function() P:pause() end, { tooltip = "暂停", color = "primary" })
+        else
+          return iconbutton("play_arrow", function() P:resume() end, { tooltip = "播放", color = "primary" })
+        end
+      end,
+    }),
+    spacer(8),
+    row({
+      text("", { bind = P:key("position"), size = 12, color = "grey" }),
+      spacer(),
+      text("", { bind = P:key("duration"), size = 12, color = "grey" }),
+    }),
+    text("", { bind = P:key("status"), size = 11, color = "grey", align = "center" }),
+    text("", { bind = P:key("error"), size = 11, color = "red", align = "center" }),
+  }, { gap = 4 })
+end)
+```
+
+> **关键模式**: Player 的 `reactive` 更新不会触发页面重建,只刷新 `bind` 绑定的组件。
+> 按钮(播放/暂停图标切换)是条件渲染,必须用 `state` 驱动整页重建来重新创建。
+> 做法是 `P:on_event` 里对非 `state` 事件递增一个 `_rebuild` state。
+
+### 底层 API (`host.audio_*`)
+
+Player 封装了这些底层函数,仅建议有定制需求时直接使用:
+
+```lua
+host.audio_ensure()                           -- 启动引擎 (Player 自动调用)
+host.audio_play(path, {channel, volume, loop, start_pos})
+host.audio_pause(channel)
+host.audio_resume(channel)
+host.audio_stop(channel)
+host.audio_seek(pos, channel)
+host.audio_set_volume(v, channel)
+host.audio_set_loop(loop, channel)
+host.audio_state(channel)                     -- → { playing, position, duration, channel }
+local id = host.audio_on_event(fn)            -- fn(channel, type, data); 返回 listener id
+host.audio_off_event(id)                      -- 注销监听器
+```
+
+### 多声道示例: BGM + SFX
+
+```lua
+local bgm = host.audio_player("bgm")
+local sfx = host.audio_player("sfx")
+
+bgm:play("/sdcard/bgm.mp3", { loop = true, volume = 0.6 })
+sfx:play("/sdcard/shot.wav")
+
+-- 两路独立控制
+bgm:pause()    -- 暂停背景音乐, 音效继续
+sfx:play("/sdcard/explosion.wav")  -- 播放新的音效
+bgm:resume()   -- 恢复背景音乐
+```
+
+### 与 love2d 游戏配合
+
+headless 音频引擎和 love2d 游戏画布**互不干扰**——它们是独立进程、独立 TCP 通道。
+游戏里要让 UI 控制音频,通过 `love_host` 发送消息即可:
+
+```lua
+-- UI 侧
+love.send(canvasId, "play_bgm", { path = "/sdcard/bgm.mp3" })
+
+-- 游戏 main.lua
+local host = require("love_host")
+host.on("play_bgm", function(data)
+  -- 游戏进程内没有 audio_player, 需要自行管理 love.audio
+end)
+```
+
+更推荐的做法是**音频全由 UI 侧 Player 管理**,游戏只处理游戏逻辑——UI 点播放按钮 → Player 播音频 + `love.send` 通知游戏当前状态。
 
 ---
 

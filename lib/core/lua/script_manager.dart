@@ -379,6 +379,9 @@ class ScriptManager {
       eng.doString(
           "package.path = '$scriptsDir/?.lua;$scriptsDir/?/init.lua;' .. package.path",
           chunkName: 'package_path');
+      eng.doString(
+          "host.audio_player = require('sandbox.audio_player')",
+          chunkName: 'audio_player_load');
       // 把 print 重定向到捕获
       eng.doString(
           "function print(...) local t={} for i=1,select('#',...) do t[i]=tostring((select(i,...))) end "
@@ -561,6 +564,10 @@ class ScriptManager {
       chunkName: 'package_path',
     );
     _engine.doString("SCRIPTS = [[$scriptsDir]]", chunkName: 'scripts_dir');
+    _engine.doString(
+      "host.audio_player = require('sandbox.audio_player')",
+      chunkName: 'audio_player_load',
+    );
 
     // 1) Agent 入口 (受保护, 独立加载): 与用户 main.lua 解耦。
     //    无论用户 main.lua 是否存在/损坏, agent 入口都先行且独立加载,
