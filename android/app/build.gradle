@@ -52,6 +52,12 @@ android {
         disable 'InvalidPackage'
     }
 
+    // WebViewUpgrade uses AssetManager.openFd, so the bundled kernel APK
+    // must remain uncompressed inside the host APK.
+    aaptOptions {
+        noCompress 'apk'
+    }
+
     flavorDimensions "distribution"
     productFlavors {
         normal {
@@ -124,4 +130,5 @@ flutter {
 dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.media:media:1.7.0'
+    implementation project(':webviewup-core')
 }

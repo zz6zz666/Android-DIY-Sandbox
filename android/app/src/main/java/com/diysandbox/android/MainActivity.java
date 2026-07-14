@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.graphics.Rect;
 import android.media.AudioManager;
 import android.net.Uri;
@@ -23,6 +24,7 @@ import android.os.Vibrator;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.DisplayCutout;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -31,6 +33,10 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.Keep;
@@ -46,6 +52,10 @@ import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import androidx.media.session.MediaButtonReceiver;
+
+import com.norman.webviewup.lib.UpgradeCallback;
+import com.norman.webviewup.lib.WebViewUpgrade;
+import com.norman.webviewup.lib.source.UpgradeAssetSource;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -63,7 +73,12 @@ import io.flutter.embedding.engine.dart.DartExecutor;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugins.GeneratedPluginRegistrant;
 
-public class MainActivity extends FragmentActivity {
+public class MainActivity extends FragmentActivity implements UpgradeCallback {
+    private static final String TAG = "DiySandboxChromium";
+    private static final String BUNDLED_WEBVIEW_ASSET =
+            "133.0.6943.138_min26_arm32+64.apk";
+    private static final String BUNDLED_WEBVIEW_VERSION = "133.0.6943.138";
+
     FlutterFragment flutterFragment;
     private static final String TAG_FLUTTER_FRAGMENT = "flutter_fragment";
     Context mContext;
@@ -81,6 +96,9 @@ public class MainActivity extends FragmentActivity {
     // 双击返回退出相关
     private boolean doubleBackToExitPressedOnce = false;
     private static final int DOUBLE_BACK_INTERVAL = 2000; // 2秒内连续按返回键
+    private ProgressBar kernelProgressBar;
+    private TextView kernelStatusText;
+    private boolean flutterAttached = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,12 +107,54 @@ public class MainActivity extends FragmentActivity {
         setContentView(com.diysandbox.android.R.layout.my_activity_layout);
         hideNavigationBar();
 
+        initializeBundledWebView();
+    }
+
+    private void initializeBundledWebView() {
+        showKernelLoadingUi();
+        WebViewUpgrade.addUpgradeCallback(this);
+
+        if (WebViewUpgrade.isCompleted()) {
+            onUpgradeComplete();
+            return;
+        }
+
+        try {
+            UpgradeAssetSource source = new UpgradeAssetSource(
+                    getApplicationContext(),
+                    BUNDLED_WEBVIEW_ASSET,
+                    BUNDLED_WEBVIEW_VERSION
+            );
+            WebViewUpgrade.upgrade(source);
+        } catch (Throwable throwable) {
+            onUpgradeError(throwable);
+        }
+    }
+
+    private void initializeFlutter() {
+        if (flutterAttached || isFinishing() || isDestroyed()) {
+            return;
+        }
+        flutterAttached = true;
         flutterFragment = (FlutterFragment) fragmentManager.findFragmentByTag(TAG_FLUTTER_FRAGMENT);
         FlutterEngine flutterEngine = new FlutterEngine(this, null, false);
         flutterEngine.getDartExecutor().executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault());
         new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), "sandbox_channel").setMethodCallHandler((call, result) -> {
             if ("lib_path".equals(call.method)) {
                 result.success(mContext.getApplicationContext().getApplicationInfo().nativeLibraryDir);
+            } else if ("webview_kernel_info".equals(call.method)) {
+                boolean bundled = WebViewUpgrade.isCompleted();
+                String packageName = bundled
+                        ? WebViewUpgrade.getUpgradeWebViewPackageName()
+                        : WebViewUpgrade.getSystemWebViewPackageName();
+                String version = bundled
+                        ? WebViewUpgrade.getUpgradeWebViewVersion()
+                        : WebViewUpgrade.getSystemWebViewPackageVersion();
+                Map<String, Object> info = new HashMap<>();
+                info.put("source", bundled ? "bundled" : "system");
+                info.put("packageName", packageName == null ? "" : packageName);
+                info.put("version", version == null ? "" : version);
+                result.success(info);
             } else {
                 result.notImplemented();
             }
@@ -181,13 +241,110 @@ public class MainActivity extends FragmentActivity {
                 .beginTransaction()
                 .add(com.diysandbox.android.R.id.fl_container, flutterFragment, TAG_FLUTTER_FRAGMENT)
                 .commit();
+        View splashContainer = findViewById(com.diysandbox.android.R.id.splash_container);
+        if (splashContainer != null) {
+            splashContainer.setVisibility(View.GONE);
+        }
+    }
+
+    private void showKernelLoadingUi() {
+        FrameLayout container = findViewById(com.diysandbox.android.R.id.splash_container);
+        if (container == null) {
+            return;
+        }
+        container.removeAllViews();
+        container.setVisibility(View.VISIBLE);
+        container.setBackgroundColor(Color.WHITE);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER);
+        int padding = (int) (24 * getResources().getDisplayMetrics().density);
+        content.setPadding(padding, padding, padding, padding);
+
+        kernelStatusText = new TextView(this);
+        kernelStatusText.setText("正在准备内置 Chromium 内核...");
+        kernelStatusText.setTextColor(Color.DKGRAY);
+        kernelStatusText.setTextSize(16);
+        kernelStatusText.setGravity(Gravity.CENTER);
+
+        kernelProgressBar = new ProgressBar(
+                this,
+                null,
+                android.R.attr.progressBarStyleHorizontal
+        );
+        kernelProgressBar.setMax(100);
+        kernelProgressBar.setProgress(0);
+
+        content.addView(
+                kernelStatusText,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+        );
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        progressParams.topMargin = (int) (16 * getResources().getDisplayMetrics().density);
+        content.addView(kernelProgressBar, progressParams);
+
+        FrameLayout.LayoutParams contentParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+        );
+        container.addView(content, contentParams);
+    }
+
+    @Override
+    public void onUpgradeProcess(float percent) {
+        runOnUiThread(() -> {
+            int progress = Math.max(0, Math.min(100, Math.round(percent * 100)));
+            if (kernelProgressBar != null) {
+                kernelProgressBar.setProgress(progress);
+            }
+            if (kernelStatusText != null) {
+                kernelStatusText.setText("正在准备内置 Chromium 内核 " + progress + "%");
+            }
+        });
+    }
+
+    @Override
+    public void onUpgradeComplete() {
+        runOnUiThread(() -> {
+            WebViewUpgrade.removeUpgradeCallback(this);
+            Log.i(
+                    TAG,
+                    "Bundled WebView enabled: "
+                            + WebViewUpgrade.getUpgradeWebViewPackageName()
+                            + " "
+                            + WebViewUpgrade.getUpgradeWebViewVersion()
+            );
+            initializeFlutter();
+        });
+    }
+
+    @Override
+    public void onUpgradeError(Throwable throwable) {
+        runOnUiThread(() -> {
+            WebViewUpgrade.removeUpgradeCallback(this);
+            Log.e(TAG, "Bundled WebView failed; falling back to system WebView", throwable);
+            if (kernelStatusText != null) {
+                kernelStatusText.setText("内置 Chromium 内核加载失败，正在使用系统 WebView");
+            }
+            new Handler().postDelayed(this::initializeFlutter, 700);
+        });
     }
 
 
     @Override
     public void onPostResume() {
         super.onPostResume();
-        flutterFragment.onPostResume();
+        if (flutterFragment != null) {
+            flutterFragment.onPostResume();
+        }
         hideNavigationBar();
     }
 
@@ -281,7 +438,9 @@ public class MainActivity extends FragmentActivity {
     @Override
     protected void onNewIntent(@NonNull Intent intent) {
         super.onNewIntent(intent);
-        flutterFragment.onNewIntent(intent);
+        if (flutterFragment != null) {
+            flutterFragment.onNewIntent(intent);
+        }
     }
 
     @Override
@@ -314,7 +473,9 @@ public class MainActivity extends FragmentActivity {
         }
 
         // 传递给 FlutterFragment
-        flutterFragment.onActivityResult(requestCode, resultCode, data);
+        if (flutterFragment != null) {
+            flutterFragment.onActivityResult(requestCode, resultCode, data);
+        }
     }
 
     // 用于从 Flutter 端调用的方法，触发文件选择器
@@ -357,26 +518,33 @@ public class MainActivity extends FragmentActivity {
             @NonNull int[] grantResults
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        flutterFragment.onRequestPermissionsResult(
-                requestCode,
-                permissions,
-                grantResults
-        );
+        if (flutterFragment != null) {
+            flutterFragment.onRequestPermissionsResult(
+                    requestCode,
+                    permissions,
+                    grantResults
+            );
+        }
     }
 
     @Override
     public void onUserLeaveHint() {
-        flutterFragment.onUserLeaveHint();
+        if (flutterFragment != null) {
+            flutterFragment.onUserLeaveHint();
+        }
     }
 
     @Override
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
-        flutterFragment.onTrimMemory(level);
+        if (flutterFragment != null) {
+            flutterFragment.onTrimMemory(level);
+        }
     }
 
     @Override
     protected void onDestroy() {
+        WebViewUpgrade.removeUpgradeCallback(this);
         super.onDestroy();
     }
 
