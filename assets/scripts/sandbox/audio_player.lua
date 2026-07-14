@@ -58,6 +58,7 @@ return function(name)
   local _nextId = 0
   local _hostId
   local _playing = false  -- track last known state
+  local _mediaOn = false  -- media session 是否启用 (seek 后据此重新校准进度基准)
 
   local function _emit(event, ...)
     local t = _events[event]
@@ -151,7 +152,13 @@ return function(name)
   end
 
   function self:seek(pos)
-    host.audio_seek(tonumber(pos) or 0, name)
+    pos = tonumber(pos) or 0
+    host.audio_seek(pos, name)
+    -- 拖动/跳转后立即把新位置推给系统媒体会话重新校准基准; 否则系统会按上一次
+    -- PlaybackState 的位置+时间戳继续外推, 进度条与实际播放脱节 (如拖回 0 秒后进度条仍从原处走)。
+    if _mediaOn then
+      self:updateMediaSession({ position = pos })
+    end
   end
 
   function self:setVolume(v)
@@ -170,6 +177,7 @@ return function(name)
 
   function self:enableMediaSession(opts)
     opts = opts or {}
+    _mediaOn = true
     host.media_session_init()
     host.media_session_update({
       title    = opts.title    or "",
@@ -196,6 +204,7 @@ return function(name)
   end
 
   function self:disableMediaSession()
+    _mediaOn = false
     host.media_session_release()
   end
 
@@ -204,6 +213,7 @@ return function(name)
   end
 
   function self:dispose()
+    _mediaOn = false
     pcall(host.media_session_release)
     if _hostId then
       host.audio_off_event(_hostId)
