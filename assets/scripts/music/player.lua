@@ -9,6 +9,10 @@ local music_dir = ""
 local current_duration = 0
 local lyrics = nil
 
+-- 前向声明: 下方媒体按键回调 (media_button) 需引用这些播放控制函数,
+-- 而它们在文件后面才定义。声明为 local 上值, 使闭包正确捕获 (否则会被当成 nil 全局)。
+local play_index, next_song, prev_song
+
 -- ============================================================
 -- Tools
 -- ============================================================
@@ -126,8 +130,9 @@ P:on("stopped", function() _ended=true; push_playing(false); R(KEYS.position).se
 P:on("ended",   function() _ended=true; push_playing(false); R(KEYS.position).set(fmt_time(0)); R(KEYS.position_val).set(0); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
 P:on("error",   function(msg) on_state_change() end)
 
--- System media buttons
-P:onMediaButton(function(action, position)
+-- System media buttons. 命名以便播放开始时重新抢占系统会话 (整个 App 只有一个系统媒体
+-- 会话, 本地播放器与在线搜索共享它; 谁在播放谁就抢占按键回调)。
+local function media_button(action, position)
   if action == "play" then
     if #playlist > 0 then
       if current_index == 0 then play_index(1)
@@ -138,13 +143,14 @@ P:onMediaButton(function(action, position)
   elseif action == "skip_next" then next_song()
   elseif action == "skip_prev" then prev_song()
   elseif action == "seek" then if position then P:seek(tonumber(position) or 0) end end
-end)
+end
+P:onMediaButton(media_button)
 
 -- ============================================================
 -- Playback control
 -- ============================================================
 
-local function play_index(idx)
+function play_index(idx)
   if idx < 1 or idx > #playlist then return end
   _ended = false
   if current_index > 0 then P:stop() end
@@ -180,7 +186,10 @@ local function play_index(idx)
     artist   = song.artist,
     album    = song.album,
     duration = current_duration,
+    artwork  = song.art_path,   -- 本地封面文件 (find_cover_art 得到)
   })
+  -- 本地播放器开始播放 → 抢占系统媒体按键回调 (从在线搜索手里接管)。
+  P:onMediaButton(media_button)
 end
 
 local function toggle_play_pause()
@@ -191,14 +200,14 @@ local function toggle_play_pause()
   else P:resume() end
 end
 
-local function next_song()
+function next_song()
   if #playlist == 0 then return end
   local idx = current_index + 1
   if idx > #playlist then idx = 1 end
   play_index(idx)
 end
 
-local function prev_song()
+function prev_song()
   if #playlist == 0 then return end
   local idx = current_index - 1
   if idx < 1 then idx = #playlist end

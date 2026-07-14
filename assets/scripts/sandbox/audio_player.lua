@@ -32,8 +32,9 @@
 --   player:off(event)       -- remove all listeners for that event
 --
 -- System media session (optional — only for full music player use cases):
---   player:enableMediaSession({ title, artist, album, duration })
---   player:updateMediaSession({ title, artist, state, position })
+--   player:enableMediaSession({ title, artist, album, duration, artwork })
+--   player:updateMediaSession({ title, artist, state, position, artwork })
+--     artwork = 本地封面路径 或 http(s) 封面 URL (可选)
 --   player:disableMediaSession()
 --   player:onMediaButton(fn)   -- fn(action, position): "play"/"pause"/"skip_next"/"skip_prev"/"seek"
 --
@@ -175,6 +176,7 @@ return function(name)
       artist   = opts.artist   or "",
       album    = opts.album    or "",
       duration = opts.duration or 0,
+      artwork  = opts.artwork or opts.cover,   -- 本地路径或 http(s) 封面 URL
       state    = "paused",
       position = 0,
     })
@@ -187,6 +189,7 @@ return function(name)
       artist   = opts.artist,
       album    = opts.album,
       duration = opts.duration,
+      artwork  = opts.artwork or opts.cover,
       state    = opts.state or (self.playing and "playing" or "paused"),
       position = math.floor(opts.position or self.position),
     })

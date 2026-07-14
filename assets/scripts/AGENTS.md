@@ -993,6 +993,11 @@ Play/Pause/Skip/Seek 按键可通过系统 UI 控制播放器。
 
 **这是一个可选功能** — 仅做音乐播放器时启用,做游戏音效或页面背景音乐时不调用即可,零开销。
 
+> **全局唯一会话**: 系统媒体会话全 App 只有一个。若同时存在多个播放器实例 (如本地播放器 + 在线搜索),
+> 它们共享这一个会话——谁最后调 `enableMediaSession` / `onMediaButton`, 谁就拥有系统控件与按键回调。
+> 因此约定: **在每次开始播放时 (再) 调用 `onMediaButton` 抢占**, 让正在播放的实例接管系统控件
+> (参见 `music/player.lua`、`music/online_search.lua` 的做法)。
+
 在 `audio_player` 实例上调用:
 
 ```lua
@@ -1014,8 +1019,13 @@ local player = require("sandbox.audio_player")("bgm")
 | `artist`   | string  | 歌手                                      |
 | `album`    | string  | 专辑                                      |
 | `duration` | number  | 总时长 (秒)                                |
+| `artwork`  | string  | 封面: 本地文件路径 或 `http(s)` URL (可选) |
 | `state`    | string  | `"playing"` / `"paused"` / `"stopped"`   |
 | `position` | number  | 当前播放位置 (秒)                           |
+
+> **合并式更新**: `updateMediaSession` 只需传本次要改的字段, 未传的 (标题/歌手/封面等) 会保留上一次的值。
+> 因此状态变化只需 `updateMediaSession({ state = "playing" })`, 不会清空标题与封面。封面在后台线程
+> 加载 (本地文件或网络 URL 均可), 自动下采样, 显示在通知栏 / 锁屏 / 车机的媒体控件上。
 
 **onMediaButton 回调:**
 
@@ -1039,15 +1049,16 @@ end)
 player:play(song_path)
 player:enableMediaSession({
   title = "歌名", artist = "歌手", album = "专辑", duration = 180,
+  artwork = "/sdcard/Music/cover.jpg",   -- 或 "https://.../cover.jpg"
 })
 
--- 状态变化时更新
+-- 状态变化时更新 (只传 state, 标题/封面自动保留)
 player:on("started", function() player:updateMediaSession({ state = "playing" }) end)
 player:on("paused",  function() player:updateMediaSession({ state = "paused" }) end)
 player:on("stopped", function() player:updateMediaSession({ state = "stopped" }) end)
 
--- 切歌时更新元数据
-player:updateMediaSession({ title = "下一首歌", artist = "新歌手" })
+-- 切歌时更新元数据 (含封面)
+player:updateMediaSession({ title = "下一首歌", artist = "新歌手", artwork = next_cover })
 
 -- 离开页面时关闭
 player:disableMediaSession()

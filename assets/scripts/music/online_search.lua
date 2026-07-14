@@ -9,6 +9,9 @@ local current_song = nil
 local lyrics = nil
 local current_duration = 0
 
+-- 前向声明: 媒体按键回调需引用 play_online_song (定义在下方), 声明为 local 上值供闭包捕获。
+local play_online_song
+
 -- ============================================================
 -- Tools
 -- ============================================================
@@ -76,8 +79,8 @@ P:on("stopped", function() _ended=true; push_playing(false); R(KEYS.position).se
 P:on("ended",   function() _ended=true; push_playing(false); R(KEYS.position).set(fmt_time(0)); R(KEYS.position_val).set(0); P:updateMediaSession({ state = "stopped" }); on_state_change() end)
 P:on("error",   function(msg) on_state_change() end)
 
--- System media buttons
-P:onMediaButton(function(action, position)
+-- System media buttons. 命名以便播放开始时重新抢占系统会话 (与本地播放器共享唯一会话)。
+local function media_button(action, position)
   if action == "play" then
     if current_song then
       if P.playing then -- already playing, nothing to do
@@ -86,13 +89,14 @@ P:onMediaButton(function(action, position)
     end
   elseif action == "pause" then P:pause()
   elseif action == "seek" then if position then P:seek(tonumber(position) or 0) end end
-end)
+end
+P:onMediaButton(media_button)
 
 -- ============================================================
 -- Playback control
 -- ============================================================
 
-local function play_online_song(song)
+function play_online_song(song)
   if not song then return end
   _ended = false
   P:stop()
@@ -121,7 +125,10 @@ local function play_online_song(song)
         artist   = song.artists,
         album    = song.album,
         duration = math.floor(current_duration),
+        artwork  = song.pic_url,   -- 在线封面 URL
       })
+      -- 在线播放器开始播放 → 抢占系统媒体按键回调 (从本地播放器手里接管)。
+      P:onMediaButton(media_button)
     else
       host.toast("Failed to get playback URL")
     end

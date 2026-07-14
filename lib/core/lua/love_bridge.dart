@@ -669,13 +669,17 @@ class MediaSessionBridge {
     String? artist,
     String? album,
     int duration = 0,
+    String? artwork,
   }) {
-    _channel.invokeMethod('updateMetadata', {
-      'title': title ?? '',
-      'artist': artist ?? '',
-      'album': album ?? '',
-      'duration': duration,
-    });
+    // 只发送本次真正提供的字段; 空/缺省一律省略, 让原生侧保留已有元数据。
+    // 否则仅更新播放状态时会把标题/歌手/封面清空 (显示成 App 名)。
+    final args = <String, dynamic>{};
+    if (title != null && title.isNotEmpty) args['title'] = title;
+    if (artist != null && artist.isNotEmpty) args['artist'] = artist;
+    if (album != null && album.isNotEmpty) args['album'] = album;
+    if (duration > 0) args['duration'] = duration;
+    if (artwork != null && artwork.isNotEmpty) args['artwork'] = artwork;
+    _channel.invokeMethod('updateMetadata', args);
   }
 
   void updatePlaybackState({

@@ -33,7 +33,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '6';
+  static const String _defaultScriptsVersion = '9';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -824,6 +824,7 @@ class ScriptManager {
         artist: opts['artist']?.toString(),
         album: opts['album']?.toString(),
         duration: (opts['duration'] is num) ? (opts['duration'] as num).toInt() : 0,
+        artwork: opts['artwork']?.toString(),
       );
       MediaSessionBridge.instance.updatePlaybackState(
         state: opts['state']?.toString() ?? 'playing',

@@ -10,6 +10,8 @@ import android.content.ComponentName;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Rect;
 import android.media.AudioManager;
 import android.net.Uri;
@@ -48,6 +50,8 @@ import androidx.media.session.MediaButtonReceiver;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -144,7 +148,11 @@ public class MainActivity extends FragmentActivity {
                     String album = call.argument("album");
                     int duration = call.argument("duration") != null
                             ? ((Number) call.argument("duration")).intValue() : 0;
+                    String artwork = call.argument("artwork");
                     updateMediaSessionMetadata(title, artist, album, duration);
+                    if (artwork != null && !artwork.isEmpty()) {
+                        updateMediaSessionArtwork(artwork);
+                    }
                     result.success(null);
                     break;
                 }
@@ -517,9 +525,10 @@ public class MainActivity extends FragmentActivity {
             if (nm != null) nm.createNotificationChannel(nc);
         }
 
-        ComponentName receiver = new ComponentName(getPackageName(),
-                MediaButtonReceiver.class.getName());
-        mediaSession = new MediaSessionCompat(this, "DIY_Sandbox_Media", receiver, null);
+        // 不设置 MediaButtonReceiver 组件: 在 Android 12+ (API 31+) 框架会把媒体按键
+        // 直接派发到 session 的 Callback (onPlay/onPause/...)。若指定了 MBR 组件, 按键会被
+        // 转发到广播 PendingIntent, 而本 app 没有处理 ACTION_MEDIA_BUTTON 的 Service, 导致丢弃。
+        mediaSession = new MediaSessionCompat(this, "DIY_Sandbox_Media");
         mediaSession.setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS |
                 MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
@@ -556,15 +565,96 @@ public class MainActivity extends FragmentActivity {
 
     private void updateMediaSessionMetadata(String title, String artist, String album, int durationSec) {
         if (mediaSession == null) return;
-        MediaMetadataCompat.Builder b = new MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title != null ? title : "")
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist != null ? artist : "")
-                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album != null ? album : "");
+        // 合并式更新: 仅覆盖本次传入的非空字段, 保留其余已有元数据 (标题/歌手/封面)。
+        // 否则仅更新播放状态 (updateMediaSession({state=...})) 时会把标题/歌手清空。
+        MediaMetadataCompat existing = mediaSession.getController() != null
+                ? mediaSession.getController().getMetadata() : null;
+        MediaMetadataCompat.Builder b = existing != null
+                ? new MediaMetadataCompat.Builder(existing)
+                : new MediaMetadataCompat.Builder();
+        if (title != null && !title.isEmpty()) b.putString(MediaMetadataCompat.METADATA_KEY_TITLE, title);
+        if (artist != null && !artist.isEmpty()) b.putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist);
+        if (album != null && !album.isEmpty()) b.putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album);
         if (durationSec > 0) {
             b.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationSec * 1000L);
         }
         mediaSession.setMetadata(b.build());
         buildMediaNotification();
+    }
+
+    // 当前封面 (供通知 setLargeIcon 用) 与其来源 key (避免重复加载)。
+    private Bitmap currentArt;
+    private String currentArtKey;
+
+    private void updateMediaSessionArtwork(final String artwork) {
+        if (mediaSession == null) return;
+        if (artwork.equals(currentArtKey)) return;   // 同一封面, 已加载
+        currentArtKey = artwork;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final Bitmap bmp = loadArtworkBitmap(artwork);
+                if (bmp == null) return;
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if (mediaSession == null) return;
+                        // 来源已切换 (快速切歌), 丢弃这张过期封面。
+                        if (!artwork.equals(currentArtKey)) return;
+                        currentArt = bmp;
+                        MediaMetadataCompat existing = mediaSession.getController() != null
+                                ? mediaSession.getController().getMetadata() : null;
+                        MediaMetadataCompat.Builder b = existing != null
+                                ? new MediaMetadataCompat.Builder(existing)
+                                : new MediaMetadataCompat.Builder();
+                        b.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bmp);
+                        b.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, bmp);
+                        mediaSession.setMetadata(b.build());
+                        buildMediaNotification();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /// 从本地路径或 http(s) URL 加载封面, 下采样到约 512px 防 OOM。失败返回 null。
+    private Bitmap loadArtworkBitmap(String artwork) {
+        try {
+            byte[] data;
+            if (artwork.startsWith("http://") || artwork.startsWith("https://")) {
+                HttpURLConnection conn = (HttpURLConnection) new URL(artwork).openConnection();
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(10000);
+                conn.setInstanceFollowRedirects(true);
+                InputStream in = conn.getInputStream();
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) != -1) bos.write(buf, 0, n);
+                in.close();
+                conn.disconnect();
+                data = bos.toByteArray();
+            } else {
+                String p = artwork.startsWith("file://") ? Uri.parse(artwork).getPath() : artwork;
+                java.io.File f = new java.io.File(p);
+                if (!f.exists()) return null;
+                data = new byte[(int) f.length()];
+                java.io.FileInputStream fis = new java.io.FileInputStream(f);
+                int off = 0, r;
+                while (off < data.length && (r = fis.read(data, off, data.length - off)) != -1) off += r;
+                fis.close();
+            }
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+            int sample = 1;
+            int max = Math.max(opts.outWidth, opts.outHeight);
+            while (max / sample > 512) sample *= 2;
+            opts.inJustDecodeBounds = false;
+            opts.inSampleSize = sample;
+            return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+        } catch (Exception e) {
+            Log.w("MediaSessionCB", "load artwork failed: " + e);
+            return null;
+        }
     }
 
     private void updateMediaSessionPlaybackState(String state, int positionSec) {
@@ -627,6 +717,8 @@ public class MainActivity extends FragmentActivity {
                         .setMediaSession(mediaSession.getSessionToken())
                         .setShowActionsInCompactView(0));
 
+        if (currentArt != null) b.setLargeIcon(currentArt);   // 通知栏封面
+
         // Play/Pause action button
         int actionIcon = playing
                 ? android.R.drawable.ic_media_pause
@@ -650,6 +742,8 @@ public class MainActivity extends FragmentActivity {
             mediaSession.release();
             mediaSession = null;
         }
+        currentArt = null;
+        currentArtKey = null;
         NotificationManagerCompat.from(this).cancel(MEDIA_NOTIFY_ID);
     }
 
