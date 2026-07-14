@@ -64,13 +64,15 @@ flutter:
   assets:
     - assets/
     - assets/love_host.lua
+    - assets/audio_svc/
+    - assets/audio_svc/main.lua
+    - assets/audio_svc/conf.lua
     - assets/scripts/
     - assets/scripts/games/
     - assets/scripts/games/demo/
     - assets/scripts/games/runner/
     - assets/scripts/games/bounce/
     - assets/scripts/games/syscheck/
-    - assets/scripts/games/audio_svc/
     - assets/scripts/widgets/
     - assets/scripts/apps/
     - assets/scripts/music/
@@ -87,7 +89,6 @@ flutter:
     - assets/scripts/games/bounce/main.lua
     - assets/scripts/games/syscheck/main.lua
     - assets/scripts/games/syscheck/conf.lua
-    - assets/scripts/games/audio_svc/main.lua
     - assets/scripts/games/physics/
     - assets/scripts/games/physics/main.lua
     - assets/scripts/games/physics/conf.lua

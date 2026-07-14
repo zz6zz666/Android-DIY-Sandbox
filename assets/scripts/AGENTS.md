@@ -787,7 +787,8 @@ host.write_file(path, json.encode(t))
 
 ## 十五、音频播放 API
 
-App 内置一个 **headless love2d 音频引擎**(`games/audio_svc`),通过加密 TCP 通道收发命令/事件。
+App 内置一个 **headless love2d 音频引擎**(固化在 App 内,随 App 版本更新,用户脚本目录不可见),
+通过加密 TCP 通道收发命令/事件。
 Lua 侧封装为两个纯底层库(`sandbox/audio_player.lua` 和 `sandbox/audio_recorder.lua`),
 可在任意脚本中 `require` 使用。
 

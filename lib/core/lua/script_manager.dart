@@ -33,7 +33,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '5';
+  static const String _defaultScriptsVersion = '6';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -393,7 +393,8 @@ class ScriptManager {
           "package.path = '$scriptsDir/?.lua;$scriptsDir/?/init.lua;' .. package.path",
           chunkName: 'package_path');
       eng.doString(
-          "host.audio_player = require('sandbox.audio_player')",
+          "local ok, mod = pcall(require, 'sandbox.audio_player')\n"
+          "host.audio_player = ok and mod or nil",
           chunkName: 'audio_player_load');
       // 把 print 重定向到捕获
       eng.doString(
@@ -577,8 +578,11 @@ class ScriptManager {
       chunkName: 'package_path',
     );
     _engine.doString("SCRIPTS = [[$scriptsDir]]", chunkName: 'scripts_dir');
+    // sandbox/audio_player.lua 是可选的多媒体扩展: 用户脚本包可能不含它。
+    // 用 pcall 安全加载, 缺失时 host.audio_player = nil, 不影响其余脚本加载。
     _engine.doString(
-      "host.audio_player = require('sandbox.audio_player')",
+      "local ok, mod = pcall(require, 'sandbox.audio_player')\n"
+      "host.audio_player = ok and mod or nil",
       chunkName: 'audio_player_load',
     );
 

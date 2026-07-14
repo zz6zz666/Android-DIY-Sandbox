@@ -298,7 +298,13 @@ class _Canvas {
 /// ```
 ///
 /// 架构: headless love 进程 (audio_svc) 通过 LoveBridge TCP 通道收发命令/事件。
-/// 文件访问: 共享存储文件 (/sdcard/) 复制到 audio_svc game 目录下的 temp_audio/,
+///
+/// 引擎固化: audio_svc 是底层音频能力 (非可替换的 API 封装), 与 love_host.lua 同类。
+/// 其源码打包在 assets/audio_svc/ 下 (不在用户可见的 assets/scripts/ 里), 运行时由
+/// [_materializeEngine] 释放到应用私有目录 (configRoot/engine/audio_svc), 用户脚本目录
+/// 里看不到、删不掉、改不坏; 每次启动强制覆盖以随 App 版本更新并自愈损坏。
+///
+/// 文件访问: 共享存储文件 (/sdcard/) 复制到引擎目录下的 temp_audio/,
 /// HTTP URL 异步下载到同一目录, love.audio.newSource 读相对路径 (PhysFS 沙盒内)。
 class LoveAudioManager {
   LoveAudioManager._();
@@ -315,6 +321,11 @@ class LoveAudioManager {
   bool _started = false;
   bool _starting = false; // 防并发重入
   String _scriptsDir = '';
+
+  /// 引擎私有目录 (固化, 用户不可见/不可改): configRoot/engine/audio_svc。
+  /// 末段保持 "audio_svc" 以对齐 conf.lua 的 t.identity 与 love_host.lua 注入路径。
+  String get _engineDir =>
+      '${Directory(_scriptsDir).parent.path}/engine/audio_svc';
 
   // 每个 channel 的最后已知状态
   final Map<String, Map<String, dynamic>> _channelStates = {};
@@ -369,10 +380,13 @@ class LoveAudioManager {
     if (_started || _starting) return;
     _starting = true;
 
+    // 从 asset 释放引擎到私有目录 (固化, 用户碰不到; 每次覆盖以自愈/随版本更新)。
+    await _materializeEngine();
+
     // Limit cache on startup (keep most recent 50 files)
     _cleanupTempCache(50);
 
-    final gamePath = '$scriptsDir/games/audio_svc';
+    final gamePath = _engineDir;
     final bridge = LoveBridge.instance;
     final bridgeArg = bridge.prepare(
       canvasId: audioCanvasId,
@@ -399,6 +413,27 @@ class LoveAudioManager {
       LuaLog.instance.error('[LoveAudioManager] startHeadless failed: $e');
     }
     _starting = false;
+  }
+
+  /// 把引擎源码 (assets/audio_svc/*) 释放到私有目录 [_engineDir]。
+  /// 总是覆盖写入: 随 App 版本更新、自愈用户/异常导致的损坏。
+  /// 同时迁移清理旧版本遗留在用户脚本目录里的 games/audio_svc。
+  Future<void> _materializeEngine() async {
+    try {
+      final dir = Directory(_engineDir);
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      for (final name in const ['main.lua', 'conf.lua']) {
+        final src = await rootBundle.loadString('assets/audio_svc/$name');
+        File('${dir.path}/$name').writeAsStringSync(src);
+      }
+    } catch (e) {
+      LuaLog.instance.error('[LoveAudioManager] 释放音频引擎失败: $e');
+    }
+    // 迁移: 删除旧版遗留在用户可见脚本目录里的引擎副本 (现已固化到私有目录)。
+    try {
+      final stale = Directory('$_scriptsDir/games/audio_svc');
+      if (stale.existsSync()) stale.deleteSync(recursive: true);
+    } catch (_) {}
   }
 
   // --- public API (对应 prelude host.audio_*) ---
@@ -463,7 +498,7 @@ class LoveAudioManager {
     try {
       final f = File(path);
       if (!f.existsSync()) return null;
-      final gameDir = '$_scriptsDir/games/audio_svc';
+      final gameDir = _engineDir;
       final cacheDir = Directory('$gameDir/temp_audio');
       if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
       _cleanupTempCache(30);
@@ -493,7 +528,7 @@ class LoveAudioManager {
 
   Future<void> _doHttpDownload(String url, String channel, double volume, bool loop) async {
     try {
-      final gameDir = '$_scriptsDir/games/audio_svc';
+      final gameDir = _engineDir;
       final cacheDir = Directory('$gameDir/temp_audio');
       if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
       _cleanupTempCache(30);  // limit HTTP cache before download
@@ -562,7 +597,7 @@ class LoveAudioManager {
 
   void _cleanupTempCache(int maxFiles) {
     try {
-      final cacheDir = Directory('$_scriptsDir/games/audio_svc/temp_audio');
+      final cacheDir = Directory('$_engineDir/temp_audio');
       if (!cacheDir.existsSync()) return;
       final files = cacheDir.listSync().whereType<File>().toList();
       if (files.length <= maxFiles) return;
