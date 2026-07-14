@@ -33,7 +33,7 @@ class ScriptManager {
   static final ScriptManager instance = ScriptManager._();
 
   /// 内置默认脚本版本; 每次修改 assets/scripts/ 下任何 .lua 后 +1 以触发重新释放。
-  static const String _defaultScriptsVersion = '9';
+  static const String _defaultScriptsVersion = '11';
 
   final LuaEngine _engine = LuaEngine();
   final Map<String, LuaFunctionRef> _pages = {};
@@ -462,29 +462,39 @@ class ScriptManager {
     }
   }
 
+  /// 将脚本释放目录打包为 zip 字节 (排除 .default_version)。无任何文件时返回 null。
+  List<int>? _zipScriptsBytes() {
+    final dir = Directory(scriptsDir);
+    if (!dir.existsSync()) return null;
+    final archive = Archive();
+    var count = 0;
+    for (final f in dir.listSync(recursive: true)) {
+      if (f is File) {
+        final rel = f.path.substring(dir.path.length + 1);
+        if (rel == '.default_version') continue; // 版本标记不导出
+        final bytes = f.readAsBytesSync();
+        archive.addFile(ArchiveFile(rel, bytes.length, bytes));
+        count++;
+      }
+    }
+    if (count == 0) return null;
+    return ZipEncoder().encode(archive);
+  }
+
+  String _zipStamp() => DateTime.now()
+      .toIso8601String()
+      .replaceAll(':', '-')
+      .replaceAll('.', '-');
+
   /// 导出整个脚本释放目录 (含 .lua / AGENTS.md / 子目录) 为 zip 到系统下载目录。
   /// 返回文件路径 (失败返回 null)。
   Future<String?> exportScriptsZip() async {
     try {
-      final dir = Directory(scriptsDir);
-      if (!dir.existsSync()) return null;
-      final archive = Archive();
-      for (final f in dir.listSync(recursive: true)) {
-        if (f is File) {
-          final rel = f.path.substring(dir.path.length + 1);
-          if (rel == '.default_version') continue; // 版本标记不导出
-          final bytes = f.readAsBytesSync();
-          archive.addFile(ArchiveFile(rel, bytes.length, bytes));
-        }
-      }
-      final zip = ZipEncoder().encode(archive);
-      final stamp = DateTime.now()
-          .toIso8601String()
-          .replaceAll(':', '-')
-          .replaceAll('.', '-');
+      final zip = _zipScriptsBytes();
+      if (zip == null) return null;
       final outDir = Directory('/storage/emulated/0/Download');
       if (!outDir.existsSync()) outDir.createSync(recursive: true);
-      final outPath = '${outDir.path}/lua_scripts_$stamp.zip';
+      final outPath = '${outDir.path}/lua_scripts_${_zipStamp()}.zip';
       File(outPath).writeAsBytesSync(zip);
       return outPath;
     } catch (e) {
@@ -549,6 +559,17 @@ class ScriptManager {
         marker.existsSync() ? marker.readAsStringSync().trim() : '';
     // 内置默认脚本版本变化时重新释放全部文件 (含 AGENTS.md 等非 .lua 文档)
     if (installedVer != _defaultScriptsVersion) {
+      // 升级场景 (此前已释放过脚本, installedVer 非空): 释放会覆盖用户 DIY 定制,
+      // 故先把当前脚本静默备份成 zip, 并置提示标记, 首页据此弹窗告知用户。
+      // 全新安装 (installedVer 为空) 无用户内容可备份, 跳过。
+      if (installedVer.isNotEmpty) {
+        final backup = _backupScriptsBeforeRelease();
+        if (backup != null) {
+          'script_upgrade_backup_path'.setting.set(backup);
+          'script_upgrade_notice_pending'.setting.set(true);
+          LuaLog.instance.info('升级: 已自动备份原脚本到 $backup');
+        }
+      }
       try {
         final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
         var copied = 0;
@@ -569,6 +590,44 @@ class ScriptManager {
       }
       marker.writeAsStringSync(_defaultScriptsVersion);
     }
+  }
+
+  /// 覆盖释放前把用户当前脚本静默备份为 zip。优先写系统下载目录
+  /// (Download/AndroidDIYSandbox, 用户可见且能用「导入」按钮选回); 失败则退回应用私有目录。
+  /// 返回备份文件绝对路径 (无内容或全部失败返回 null)。
+  String? _backupScriptsBeforeRelease() {
+    try {
+      final zip = _zipScriptsBytes();
+      if (zip == null) return null;
+      final name = 'lua_backup_${_zipStamp()}.zip';
+      for (final base in [
+        '/storage/emulated/0/Download/AndroidDIYSandbox',
+        '${RuntimeEnvir.configPath}/backups',
+      ]) {
+        try {
+          final d = Directory(base);
+          if (!d.existsSync()) d.createSync(recursive: true);
+          final out = '$base/$name';
+          File(out).writeAsBytesSync(zip);
+          return out;
+        } catch (_) {
+          // 尝试下一个备份位置
+        }
+      }
+      return null;
+    } catch (e) {
+      LuaLog.instance.error('备份原脚本失败: $e');
+      return null;
+    }
+  }
+
+  /// 若本次启动因版本升级自动备份了用户脚本, 返回备份路径并清除标记 (仅提示一次)。
+  /// 无待提示时返回 null。
+  String? consumeUpgradeBackupNotice() {
+    if ('script_upgrade_notice_pending'.setting.get() != true) return null;
+    'script_upgrade_notice_pending'.setting.set(false);
+    final path = 'script_upgrade_backup_path'.setting.get();
+    return path is String && path.isNotEmpty ? path : null;
   }
 
   void _loadUserScripts() {

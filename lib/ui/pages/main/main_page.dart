@@ -49,6 +49,98 @@ class _MainPageState extends State<MainPage> {
       _switchTab(index);
       homeController.clearPendingMainTabIndex(index);
     });
+    // 升级后若自动备份过用户脚本, 首次进入时弹窗告知 (仅一次)。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final backupPath = ScriptManager.instance.consumeUpgradeBackupNotice();
+      if (backupPath != null) _showUpgradeBackupDialog(backupPath);
+    });
+  }
+
+  /// 版本升级自动替换脚本 + 备份原脚本后的一次性提示。
+  void _showUpgradeBackupDialog(String backupPath) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    // 只从 Download 起显示, 去掉冗长的 /storage/emulated/0/ 前缀。
+    const extPrefix = '/storage/emulated/0/';
+    final shownPath = backupPath.startsWith(extPrefix)
+        ? backupPath.substring(extPrefix.length)
+        : backupPath;
+
+    Get.dialog(
+      PopScope(
+        canPop: false,
+        child: AlertDialog(
+          icon: Icon(Icons.auto_awesome_rounded, color: cs.primary, size: 28),
+          title: const Text('脚本已更新'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '已自动将脚本替换为新版 App 的演示脚本，方便你了解并体验最新特性。',
+                  style: TextStyle(height: 1.5, color: cs.onSurfaceVariant),
+                ),
+                const SizedBox(height: 18),
+                Text('原脚本已自动备份到',
+                    style: theme.textTheme.labelMedium
+                        ?.copyWith(color: cs.onSurfaceVariant)),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: cs.outlineVariant),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.folder_zip_outlined, size: 18, color: cs.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SelectableText(
+                          shownPath,
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text.rich(
+                  TextSpan(
+                    style: TextStyle(height: 1.5, color: cs.onSurfaceVariant),
+                    children: [
+                      const TextSpan(text: '如需恢复，点击设置页顶栏的 '),
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(Icons.file_download_outlined,
+                            size: 18, color: cs.primary),
+                      ),
+                      const TextSpan(text: ' 按钮重新导入即可。'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          actions: [
+            FilledButton(
+              onPressed: () => Get.back(),
+              child: const Text('知道了'),
+            ),
+          ],
+        ),
+      ),
+      barrierDismissible: false,
+    );
   }
 
   @override
