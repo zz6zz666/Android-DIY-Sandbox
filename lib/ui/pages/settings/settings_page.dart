@@ -429,21 +429,15 @@ class _SettingsPageState extends State<SettingsPage> {
       }
 
       // 查找与当前构建变体匹配的APK文件名
-      // normal 版本 APK 不含 flavor 标记, chromium 版本含 -chromium- 标记
+      // normal 与 chromium 均带显式风味标记 -normal- / -chromium-
       String? apkFileName;
       for (final asset in assets) {
         final name = asset['name'] as String? ?? '';
         if (!name.endsWith('.apk')) continue;
-        if (_buildFlavor == 'chromium') {
-          if (name.contains('-chromium-')) {
-            apkFileName = name;
-            break;
-          }
-        } else {
-          if (!name.contains('-chromium-')) {
-            apkFileName = name;
-            break;
-          }
+        final targetMarker = '-${_buildFlavor}-';
+        if (name.contains(targetMarker)) {
+          apkFileName = name;
+          break;
         }
       }
 

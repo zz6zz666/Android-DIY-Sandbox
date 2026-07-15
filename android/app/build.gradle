@@ -106,7 +106,7 @@ android {
     project.android.applicationVariants.all { variant ->
         variant.outputs.each { output ->
             output.versionCodeOverride = flutter.versionCode
-            def flavorTag = variant.productFlavors[0].name == "chromium" ? "-chromium" : ""
+            def flavorTag = "-${variant.productFlavors[0].name}"
             output.outputFileName = "Android-DIY-Sandbox-v${variant.versionName}${flavorTag}-${variant.buildType.name}.apk"
         }
     }
