@@ -106,8 +106,16 @@ public class MainActivity extends FragmentActivity implements UpgradeCallback {
         mContext = this;
         setContentView(com.diysandbox.android.R.layout.my_activity_layout);
         hideNavigationBar();
-        new Handler().postDelayed(this::hideNavigationBar, 600);
-        new Handler().postDelayed(this::hideNavigationBar, 1500);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            Window window = getWindow();
+            if (window != null && window.getDecorView() != null) {
+                window.getDecorView().setOnSystemUiVisibilityChangeListener(visibility -> {
+                    if ((visibility & View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0) {
+                        new Handler().postDelayed(this::hideNavigationBar, 500);
+                    }
+                });
+            }
+        }
 
         if (BuildConfig.USE_BUNDLED_CHROMIUM) {
             initializeBundledWebView();
@@ -383,7 +391,7 @@ public class MainActivity extends FragmentActivity implements UpgradeCallback {
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                             | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                             | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_IMMERSIVE);
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         }
     }
 

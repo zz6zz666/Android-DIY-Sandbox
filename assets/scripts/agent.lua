@@ -137,7 +137,28 @@ function M.launch(target_dir, tab_name)
     end, { title = "未安装 opencode", ok_text = "前往安装", cancel_text = "取消" })
     return
   end
-  if S.running and S.port then open_webui(target_dir, tab_name); return end
+  if S.running and S.port then
+    -- 防御式健康检查: 引擎进程可能在终端内被 Ctrl+C 但 PTY 未退出,
+    -- 或 spwan tab 被手动关掉后 onExit 未必及时回调。发一个简短的 HTTP 探测
+    -- 确认服务确实在响应,避免打开空/错误页面。
+    host.http({
+      url = "http://127.0.0.1:" .. S.port .. "/",
+      timeout = 3,
+      on_done = function(res)
+        if res and res.status == 200 then open_webui(target_dir, tab_name) else
+          S.running = false; S.port = nil
+          host.toast("opencode 引擎已离线，正在重新启动…")
+          M.launch(target_dir, tab_name)
+        end
+      end,
+      on_error = function()
+        S.running = false; S.port = nil
+        host.toast("opencode 引擎已离线，正在重新启动…")
+        M.launch(target_dir, tab_name)
+      end,
+    })
+    return
+  end
   host.toast("正在启动 opencode…")
   host.free_port(41000, 45000, {}, function(p)
     if not p then host.toast("无可用端口"); return end

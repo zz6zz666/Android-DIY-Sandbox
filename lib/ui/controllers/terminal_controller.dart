@@ -153,6 +153,7 @@ class HomeController extends GetxController {
       if (key != null) {
         _spawnTabIds.remove(key);
         _setSpawnRunning(key, false);
+        _spawnExitCallbacks.remove(key)?.call();
       }
     };
 
@@ -272,6 +273,7 @@ class HomeController extends GetxController {
   final RxInt spawnRevision = 0.obs;
   final Map<String, bool> spawnRunning = {};
   final Map<String, String> _spawnTabIds = {};
+  final Map<String, void Function()> _spawnExitCallbacks = {};
 
   bool isSpawnRunning(String key) => spawnRunning[key] == true;
 
@@ -302,18 +304,25 @@ class HomeController extends GetxController {
           'echo $marker\n',
       onDoneMarker: marker,
       onCommandDone: () {
-        if (key != null) _spawnTabIds.remove(key);
+        if (key != null) {
+          _spawnTabIds.remove(key);
+          _spawnExitCallbacks.remove(key);
+        }
         _setSpawnRunning(key, false);
         onExit?.call();
       },
     );
-    if (key != null && tabId.isNotEmpty) _spawnTabIds[key] = tabId;
+    if (key != null && tabId.isNotEmpty) {
+      _spawnTabIds[key] = tabId;
+      if (onExit != null) _spawnExitCallbacks[key] = onExit;
+    }
     _setSpawnRunning(key, true);
   }
 
   /// 停止 key 对应的 spawn (关闭其终端 tab 并 kill 进程)。
   void stopSpawn(String key) {
     final id = _spawnTabIds.remove(key);
+    _spawnExitCallbacks.remove(key)?.call();
     if (id != null) terminalTabManager.closeTabById(id);
     _setSpawnRunning(key, false);
   }
