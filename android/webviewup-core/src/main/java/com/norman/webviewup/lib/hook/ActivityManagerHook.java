@@ -1,0 +1,370 @@
+package com.norman.webviewup.lib.hook;
+
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.IBinder;
+import android.util.Log;
+
+import androidx.annotation.NonNull;
+
+import com.norman.webviewup.lib.WebViewReplace;
+import com.norman.webviewup.lib.reflect.RuntimeAccess;
+import com.norman.webviewup.lib.sandbox.SandboxedProcessServiceDelegate;
+import com.norman.webviewup.lib.service.binder.BinderHook;
+import com.norman.webviewup.lib.service.binder.ProxyBinder;
+import com.norman.webviewup.lib.service.interfaces.IActivityManager;
+import com.norman.webviewup.lib.service.interfaces.IActivityManagerNative;
+import com.norman.webviewup.lib.service.interfaces.ISingleton;
+import com.norman.webviewup.lib.service.proxy.ActivityManagerProxy;
+
+import java.lang.reflect.Method;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Hook ActivityManager 实现沙盒进程替身重定向。
+ *
+ * 当 Chromium 通过 bindIsolatedService / bindServiceInstance 尝试拉起 WebView 包中的
+ * SandboxedProcessService{N} 时，本 Hook 将 Intent 的 ComponentName 替换为
+ * core 库中预注册的 StubSandboxedProcessService{N}，并将热替换后的 WebView APK
+ * 路径注入到 Intent extras，供沙盒进程内的 SandboxedProcessServiceDelegate 动态加载 dex。
+ *
+ * Stub 服务运行在宿主 App 的普通子进程中（非 isolated），因此可以直接读取宿主私有目录下的 APK，
+ * 无需 ashmem / FD 传递等复杂机制。
+ */
+public class ActivityManagerHook extends BinderHook {
+
+    private static final String TAG = "ActivityManagerHook";
+
+    private static final String SANDBOX_SERVICE_NAME = "SandboxedProcessService";
+
+    private static final Pattern SANDBOX_SERVICE_INDEX_PATTERN =
+            Pattern.compile(SANDBOX_SERVICE_NAME + "(\\d+)$");
+
+    private static final String STUB_SERVICE_CLASS_PREFIX =
+            "com.norman.webviewup.lib.sandbox.stub.Stub" + SANDBOX_SERVICE_NAME;
+
+    private final Context context;
+    private final String hostPackageName;
+    private final String targetWebViewPackage;
+    private final String webViewApkPath;
+    private final String webViewLibsPath;
+    private final int maxStubServices;
+
+    private Object mOriginalAm;
+    private ISingleton mSingleton;
+
+    /**
+     * @param context 宿主 App Context
+     * @param target  本次替换目标快照（包名必填；apk/libs 可为 null，与仅已安装包替换路径一致）
+     */
+    public ActivityManagerHook(@NonNull Context context, @NonNull ReplaceTarget target) {
+        this.context = context;
+        this.targetWebViewPackage = target.getWebViewPackageName();
+        this.webViewApkPath = target.getApkPath();
+        this.webViewLibsPath = target.getLibsPath();
+        this.hostPackageName = context.getPackageName();
+        this.maxStubServices = ActivityManagerHookPolicy.resolveMaxStubServices(context);
+    }
+
+    @Override
+    protected IBinder onTargetBinderObtain() {
+        return null;
+    }
+
+    @Override
+    protected ProxyBinder onProxyBinderCreate(IBinder ignored) {
+        Object gDefault;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            IActivityManager am = RuntimeAccess.staticAccess(IActivityManager.class);
+            gDefault = am.getIActivityManagerSingleton();
+        } else {
+            IActivityManagerNative amn = RuntimeAccess.staticAccess(IActivityManagerNative.class);
+            gDefault = amn.getGDefault();
+        }
+
+        mSingleton = RuntimeAccess.objectAccess(ISingleton.class, gDefault);
+        mOriginalAm = mSingleton.getInstance();
+
+        if (mOriginalAm == null) {
+            Log.e(TAG, "IActivityManager 实例为 null，无法 hook");
+            return null;
+        }
+
+        ActivityManagerProxy proxy = new ActivityManagerProxy() {
+            @Override
+            protected Object bindService(Object... args) {
+                debugTrace("H0", "bindService", "intercept", summarizeArgs(args));
+                Intent redirectedIntent = findAndRedirectIntent(args);
+                if (redirectedIntent != null) {
+                    return callBindServiceOnRealAM(args);
+                }
+                return invoke();
+            }
+
+            @Override
+            protected Object bindIsolatedService(Object... args) {
+                debugTrace("H3", "bindIsolatedService", "intercept", summarizeArgs(args));
+                Intent redirectedIntent = findAndRedirectIntent(args);
+                if (redirectedIntent != null) {
+                    return callBindServiceOnRealAM(args);
+                }
+                return invoke();
+            }
+
+            @Override
+            protected Object bindServiceInstance(Object... args) {
+                debugTrace("H1", "bindServiceInstance", "intercept", summarizeArgs(args));
+                Intent redirectedIntent = findAndRedirectIntent(args);
+                if (redirectedIntent != null) {
+                    return callBindServiceOnRealAM(args);
+                }
+                return invoke();
+            }
+        };
+
+        proxy.setTarget(mOriginalAm);
+        Object proxyAm = proxy.get();
+
+        mSingleton.setInstance(proxyAm);
+        return null;
+    }
+
+    @Override
+    protected void onTargetBinderRestore(IBinder binder) {
+        if (mSingleton != null && mOriginalAm != null) {
+            mSingleton.setInstance(mOriginalAm);
+            Log.i(TAG, "ActivityManagerHook 已恢复");
+        }
+    }
+
+    @Override
+    protected void onProxyBinderReplace(ProxyBinder proxyBinder) {
+        Log.i(TAG, "ActivityManagerHook 激活成功，宿主包名=" + hostPackageName
+                + "，监控目标=" + targetWebViewPackage);
+    }
+
+    // -----------------------------------------------------------------------
+    //  重定向核心逻辑
+    // -----------------------------------------------------------------------
+
+    /**
+     * 在参数数组中找到 Intent，执行重定向逻辑。
+     * 返回被重定向的 Intent（表示需要转调 bindService），或 null（表示不拦截）。
+     */
+    private Intent findAndRedirectIntent(Object[] args) {
+        if (args == null) return null;
+        for (Object arg : args) {
+            if (arg instanceof Intent) {
+                Intent intent = (Intent) arg;
+                if (redirectSandboxServiceIfNeeded(intent)) {
+                    return intent;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 检查并重定向 Intent 到 StubService。
+     * 返回 true 表示已重定向（需要转调 bindService），false 表示不拦截。
+     */
+    private boolean redirectSandboxServiceIfNeeded(Intent intent) {
+        ComponentName component = intent.getComponent();
+        if (component == null) return false;
+
+        // Chromium 可能先走 bindIsolatedService（已把 Intent 改成 Stub），再走 bindServiceInstance。
+        // 此时 Component 已是宿主包名，若这里返回 false 会走 invoke() → 真实 bindServiceInstance，
+        // 系统不允许对非 isolated 的 Stub 使用 instance name，直接抛 IllegalArgumentException。
+        if (hostPackageName.equals(component.getPackageName())
+                && component.getClassName() != null
+                && component.getClassName().startsWith(STUB_SERVICE_CLASS_PREFIX)) {
+            debugTrace("H6", "redirectSandboxServiceIfNeeded", "intent already stub",
+                    component.flattenToShortString());
+            ensureSandboxIntentExtras(intent);
+            return true;
+        }
+
+        if (!targetWebViewPackage.equals(component.getPackageName())) {
+            return false;
+        }
+
+        String className = component.getClassName();
+        if (className == null) {
+            return false;
+        }
+        Pattern customPattern = ActivityManagerHookPolicy.getSandboxServiceClassPattern();
+        if (customPattern != null) {
+            if (!customPattern.matcher(className).find()) {
+                return false;
+            }
+        } else if (!className.contains(SANDBOX_SERVICE_NAME)) {
+            return false;
+        }
+
+        Matcher matcher = SANDBOX_SERVICE_INDEX_PATTERN.matcher(className);
+        int sandboxIndex = 0;
+        if (matcher.find()) {
+            try {
+                sandboxIndex = Integer.parseInt(matcher.group(1));
+            } catch (NumberFormatException e) {
+                Log.w(TAG, "无法解析沙盒编号，使用 0: " + className);
+            }
+        }
+
+        int stubIndex = maxStubServices > 0 ? sandboxIndex % maxStubServices : 0;
+        String stubClassName = STUB_SERVICE_CLASS_PREFIX + stubIndex;
+        ComponentName stubComponent = new ComponentName(hostPackageName, stubClassName);
+
+        Bundle extras = intent.getExtras();
+        if (extras == null) {
+            extras = new Bundle();
+        }
+
+        extras.putString(SandboxedProcessServiceDelegate.EXTRA_WEBVIEW_APK_PATH, webViewApkPath);
+        extras.putString(SandboxedProcessServiceDelegate.EXTRA_WEBVIEW_LIBS_PATH, webViewLibsPath);
+        extras.putString(SandboxedProcessServiceDelegate.EXTRA_WEBVIEW_PACKAGE_NAME, targetWebViewPackage);
+        extras.putString(SandboxedProcessServiceDelegate.EXTRA_ORIGINAL_SERVICE_CLASS, className);
+
+        try {
+            PackageInfo packageInfo = WebViewReplace.REPLACE_WEB_VIEW_PACKAGE_INFO;
+            if (packageInfo != null && packageInfo.applicationInfo != null
+                    && packageInfo.applicationInfo.sharedLibraryFiles != null) {
+                extras.putStringArray(SandboxedProcessServiceDelegate.EXTRA_SHARED_LIBS,
+                        packageInfo.applicationInfo.sharedLibraryFiles);
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "获取 WebView SharedLibs 失败", t);
+        }
+
+        intent.putExtras(extras);
+
+        Log.i(TAG,
+                "沙盒进程重定向: " + component.flattenToShortString()
+                        + " → " + stubComponent.flattenToShortString()
+                        + " (原编号=" + sandboxIndex + ", Stub编号=" + stubIndex + ")"
+                        + " apkPath=" + webViewApkPath);
+
+        intent.setComponent(stubComponent);
+        return true;
+    }
+
+    /** 第二次及以后的 AMS 调用可能仍携带同一 Intent，补全 extras 避免子进程缺路径。 */
+    private void ensureSandboxIntentExtras(Intent intent) {
+        Bundle extras = intent.getExtras();
+        if (extras == null) {
+            extras = new Bundle();
+            intent.putExtras(extras);
+        }
+        if (webViewApkPath != null) {
+            extras.putString(SandboxedProcessServiceDelegate.EXTRA_WEBVIEW_APK_PATH, webViewApkPath);
+        }
+        if (webViewLibsPath != null) {
+            extras.putString(SandboxedProcessServiceDelegate.EXTRA_WEBVIEW_LIBS_PATH, webViewLibsPath);
+        }
+        if (targetWebViewPackage != null) {
+            extras.putString(SandboxedProcessServiceDelegate.EXTRA_WEBVIEW_PACKAGE_NAME, targetWebViewPackage);
+        }
+        try {
+            PackageInfo packageInfo = WebViewReplace.REPLACE_WEB_VIEW_PACKAGE_INFO;
+            if (packageInfo != null && packageInfo.applicationInfo != null
+                    && packageInfo.applicationInfo.sharedLibraryFiles != null) {
+                extras.putStringArray(SandboxedProcessServiceDelegate.EXTRA_SHARED_LIBS,
+                        packageInfo.applicationInfo.sharedLibraryFiles);
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "ensureSandboxIntentExtras: SharedLibs 失败", t);
+        }
+    }
+
+    /**
+     * 将 bindIsolatedService / bindServiceInstance 的参数适配后，转调 AMS 的 bindService。
+     * <p>
+     * bindIsolatedService 参数列表（API 29+）：
+     *   (IApplicationThread caller, IBinder token, Intent service, String resolvedType,
+     *    IServiceConnection connection, int/long flags, String instanceName,
+     *    String callingPackage, int userId)
+     * <p>
+     * bindService 参数列表：
+     *   (IApplicationThread caller, IBinder token, Intent service, String resolvedType,
+     *    IServiceConnection connection, int/long flags, String callingPackage, int userId)
+     * <p>
+     * 差异：去掉 instanceName，flags 去掉 BIND_EXTERNAL_SERVICE。
+     */
+    private Object callBindServiceOnRealAM(Object[] originalArgs) {
+        try {
+            Method bindServiceMethod = BindServiceArgsAdapter.findBestBindServiceMethod(
+                    mOriginalAm, originalArgs);
+            if (bindServiceMethod == null) {
+                debugTrace("H2", "callBindServiceOnRealAM", "bindService method not found",
+                        summarizeArgs(originalArgs));
+                Log.e(TAG, "无法找到 AMS 的 bindService 方法，降级调用原方法");
+                return null;
+            }
+
+            debugTrace("H2", "callBindServiceOnRealAM", "selected bindService method",
+                    summarizeMethod(bindServiceMethod));
+            Object[] adaptedArgs = BindServiceArgsAdapter.adapt(
+                    originalArgs, bindServiceMethod, hostPackageName);
+            debugTrace("H1", "callBindServiceOnRealAM", "adapted args",
+                    summarizeArgs(adaptedArgs));
+            Log.i(TAG, "bindService method=" + summarizeMethod(bindServiceMethod)
+                    + " src=" + summarizeArgs(originalArgs)
+                    + " adapted=" + summarizeArgs(adaptedArgs));
+            return bindServiceMethod.invoke(mOriginalAm, adaptedArgs);
+        } catch (Throwable t) {
+            debugTrace("H1", "callBindServiceOnRealAM", "invoke bindService failed",
+                    String.valueOf(t));
+            Log.e(TAG, "转调 bindService 失败", t);
+            return null;
+        }
+    }
+
+    private String summarizeMethod(Method m) {
+        if (m == null) return "null";
+        StringBuilder sb = new StringBuilder();
+        sb.append(m.getDeclaringClass().getName()).append("#").append(m.getName()).append("(");
+        Class<?>[] types = m.getParameterTypes();
+        for (int i = 0; i < types.length; i++) {
+            if (i > 0) sb.append(",");
+            sb.append(types[i].getSimpleName());
+        }
+        sb.append(")->").append(m.getReturnType().getSimpleName());
+        return sb.toString();
+    }
+
+    private String summarizeArgs(Object[] args) {
+        if (args == null) return "args=null";
+        StringBuilder sb = new StringBuilder();
+        sb.append("len=").append(args.length);
+        for (int i = 0; i < args.length; i++) {
+            Object arg = args[i];
+            sb.append(" | ").append(i).append(":");
+            if (arg == null) {
+                sb.append("null");
+                continue;
+            }
+            sb.append(arg.getClass().getSimpleName()).append("=");
+            if (arg instanceof Intent) {
+                ComponentName c = ((Intent) arg).getComponent();
+                sb.append(c != null ? c.flattenToShortString() : "intent_no_component");
+            } else if (arg instanceof String || arg instanceof Integer || arg instanceof Long
+                    || arg instanceof Boolean) {
+                sb.append(arg);
+            } else {
+                sb.append(arg.getClass().getName());
+            }
+        }
+        return sb.toString();
+    }
+
+    /** 调试用：adb logcat -s ActivityManagerHook:D */
+    private static void debugTrace(String hypothesisId, String where, String message, String data) {
+        Log.d(TAG, "[" + hypothesisId + "] " + where + " | " + message + " | " + data);
+    }
+}
+

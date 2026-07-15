@@ -46,16 +46,25 @@ android {
         ndk {
             abiFilters 'arm64-v8a'
         }
+        buildConfigField "boolean", "USE_BUNDLED_CHROMIUM", "false"
     }
 
     lintOptions {
         disable 'InvalidPackage'
     }
 
+    aaptOptions {
+        noCompress 'apk'
+    }
+
     flavorDimensions "distribution"
     productFlavors {
         normal {
             dimension "distribution"
+        }
+        chromium {
+            dimension "distribution"
+            buildConfigField "boolean", "USE_BUNDLED_CHROMIUM", "true"
         }
         profileTest {
             dimension "distribution"
@@ -97,7 +106,8 @@ android {
     project.android.applicationVariants.all { variant ->
         variant.outputs.each { output ->
             output.versionCodeOverride = flutter.versionCode
-            output.outputFileName = "Android-DIY-Sandbox-v${variant.versionName}-${variant.buildType.name}.apk"
+            def flavorTag = variant.productFlavors[0].name == "chromium" ? "-chromium" : ""
+            output.outputFileName = "Android-DIY-Sandbox-v${variant.versionName}${flavorTag}-${variant.buildType.name}.apk"
         }
     }
 
@@ -115,6 +125,7 @@ android {
 
     buildFeatures {
         aidl true
+        buildConfig true
     }
 }
 
@@ -124,4 +135,5 @@ flutter {
 dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.media:media:1.7.0'
+    implementation project(':webviewup-core')
 }

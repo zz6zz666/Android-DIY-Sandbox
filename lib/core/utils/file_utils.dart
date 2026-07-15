@@ -81,6 +81,15 @@ Future<String> getLibPath() async {
   return await _channel.invokeMethod('lib_path');
 }
 
+/// 获取当前构建变体类型: "normal" 或 "chromium"
+Future<String> getBuildFlavor() async {
+  try {
+    return await _channel.invokeMethod('build_flavor') ?? 'normal';
+  } catch (_) {
+    return 'normal';
+  }
+}
+
 Pty createPTY({
   String? shell,
   int rows = 25,

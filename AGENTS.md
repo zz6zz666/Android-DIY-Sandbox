@@ -2,16 +2,25 @@
 
 ## 构建
 
-**APK(arm64, debug):**
+**normal (系统 WebView):**
 
 ```
 flutter build apk --debug --flavor normal --target-platform android-arm64 --no-tree-shake-icons
 ```
 
-**APK(arm64, release):**
-
 ```
 flutter build apk --release --flavor normal --target-platform android-arm64 --no-tree-shake-icons && cp build/app/outputs/apk/normal/release/Android-DIY-Sandbox-*.apk build/app/outputs/flutter-apk/ && APK=$(ls build/app/outputs/flutter-apk/Android-DIY-Sandbox-*.apk | head -1) && sha1sum "$APK" | cut -d' ' -f1 > "${APK}.sha1"
+```
+
+**chromium (内置 Chromium 内核):**
+
+```
+flutter build apk --debug --flavor chromium --target-platform android-arm64 --no-tree-shake-icons
+```
+
+```
+flutter build apk --release --flavor chromium --target-platform android-arm64 --no-tree-shake-icons && cp build/app/outputs/apk/chromium/release/Android-DIY-Sandbox-*.apk build/app/outputs/flutter-apk/ && APK=$(ls build/app/outputs/flutter-apk/Android-DIY-Sandbox-*.apk | head -1) && sha1sum "$APK" | cut -d' ' -f1 > "${APK}.sha1"
+```
 ```
 
 Gradle 已配置 `outputFileName`,产物在 `android/app/outputs/apk/` 下自动命名为

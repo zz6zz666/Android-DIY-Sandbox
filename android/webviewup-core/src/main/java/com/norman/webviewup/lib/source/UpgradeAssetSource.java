@@ -1,0 +1,117 @@
+package com.norman.webviewup.lib.source;
+
+import android.content.Context;
+import android.content.res.AssetFileDescriptor;
+import android.content.res.AssetManager;
+import android.util.Log;
+
+import androidx.annotation.NonNull;
+
+import com.norman.webviewup.lib.util.ApksUtils;
+import com.norman.webviewup.lib.util.FileUtils;
+import com.norman.webviewup.lib.util.VersionUtils;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.channels.FileChannel;
+
+public class UpgradeAssetSource extends UpgradePathSource {
+
+    private final String assetName;
+
+    /**
+     * 兼容老 API
+     * 用户指定了外置的 File 路径
+     * @deprecated 建议使用 {@link #UpgradeAssetSource(Context, String)} 让框架自动管理沙盒
+     */
+    @Deprecated
+    public UpgradeAssetSource(Context context, @NonNull String assetName, @NonNull File file) {
+        super(context, file.getPath(), true);
+        this.assetName = assetName;
+    }
+
+    /**
+     * 新架构推荐用法
+     * 自动管理沙盒缓存，并感知宿主 App 的版本更新
+     */
+    public UpgradeAssetSource(Context context, @NonNull String assetName) {
+        super(context, assetName + "_" + VersionUtils.getAppVersionCode(context));
+        this.assetName = assetName;
+    }
+
+    /**
+     * 指定明确的 assets 版本标识，避免 App 升级导致的无意义复制
+     * @param context
+     * @param assetName assets 文件名
+     * @param assetVersion 该 assets 文件的版本号或 MD5（当此值改变时才会重新复制）
+     */
+    public UpgradeAssetSource(Context context, @NonNull String assetName, @NonNull String assetVersion) {
+        super(context, assetName + "_" + assetVersion);
+        this.assetName = assetName;
+    }
+
+    private final Runnable copyAssetRunnable = new Runnable() {
+        @Override
+        public void run() {
+            FileOutputStream outputStream = null;
+            FileInputStream inputStream = null;
+            boolean isSuccess = false;
+            try {
+                FileUtils.createFile(getApkPath());
+                outputStream = new FileOutputStream(getApkPath());
+                FileChannel dstChannel = outputStream.getChannel();
+                AssetManager assetManager = getContext().getAssets();
+                AssetFileDescriptor assetFileDescriptor = assetManager.openFd(assetName);
+                inputStream = assetFileDescriptor.createInputStream();
+                FileChannel fileChannel = inputStream.getChannel();
+                long startOffset = assetFileDescriptor.getStartOffset();
+                long declaredLength = assetFileDescriptor.getDeclaredLength();
+                int size = 100;
+                long partSize = (long) Math.ceil(declaredLength * 1.0 / size);
+                long position = startOffset;
+                for (int i = 0; i < size; i++) {
+                    long count = i != size - 1 ? partSize : declaredLength - i * partSize;
+                    long transferred = 0;
+                    while (transferred < count) {
+                        long bytes = fileChannel.transferTo(position + transferred, count - transferred, dstChannel);
+                        if (bytes <= 0) break;
+                        transferred += bytes;
+                    }
+                    process(i * 1.0f / size);
+                    position = position + count;
+                }
+                dstChannel.force(true);
+                isSuccess = true;
+            } catch (Throwable e) {
+                FileUtils.delete(getApkPath());
+                error(e);
+            } finally {
+                if (outputStream != null) {
+                    try {
+                        outputStream.close();
+                    } catch (IOException ignore) {
+
+                    }
+                }
+                if (inputStream != null) {
+                    try {
+                        inputStream.close();
+                    } catch (IOException ignore) {
+
+                    }
+                }
+                if (isSuccess) {
+                    success();
+                }
+            }
+        }
+    };
+
+    @Override
+    protected void onPrepare(Object params) {
+        new Thread(copyAssetRunnable).start();
+    }
+}
+

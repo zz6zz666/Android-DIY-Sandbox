@@ -13,6 +13,7 @@ import '../../controllers/terminal_controller.dart';
 import '../../../core/constants/scripts.dart' as scripts;
 import '../../../core/services/password_manager.dart';
 import '../../../core/config/app_config.dart';
+import '../../../core/utils/file_utils.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -23,6 +24,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   String _appVersion = '';
+  String _buildFlavor = 'normal';
   bool _isBatteryOptimizationIgnored = false;
 
   // 存储从GitHub API获取的原始下载URL
@@ -35,7 +37,15 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _loadAppVersion();
+    _loadBuildFlavor();
     _checkBatteryOptimizationStatus();
+  }
+
+  Future<void> _loadBuildFlavor() async {
+    final flavor = await getBuildFlavor();
+    setState(() {
+      _buildFlavor = flavor;
+    });
   }
 
   Future<void> _loadAppVersion() async {
@@ -418,13 +428,32 @@ class _SettingsPageState extends State<SettingsPage> {
         return;
       }
 
-      // 查找APK文件名
+      // 查找与当前构建变体匹配的APK文件名
+      // normal 版本 APK 不含 flavor 标记, chromium 版本含 -chromium- 标记
       String? apkFileName;
       for (final asset in assets) {
         final name = asset['name'] as String? ?? '';
-        if (name.endsWith('.apk')) {
-          apkFileName = name;
-          break;
+        if (!name.endsWith('.apk')) continue;
+        if (_buildFlavor == 'chromium') {
+          if (name.contains('-chromium-')) {
+            apkFileName = name;
+            break;
+          }
+        } else {
+          if (!name.contains('-chromium-')) {
+            apkFileName = name;
+            break;
+          }
+        }
+      }
+
+      if (apkFileName == null) {
+        for (final asset in assets) {
+          final name = asset['name'] as String? ?? '';
+          if (name.endsWith('.apk')) {
+            apkFileName = name;
+            break;
+          }
         }
       }
 
@@ -584,11 +613,12 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _updateTile() {
+    final flavorLabel = _buildFlavor == 'chromium' ? ' [内置内核]' : '';
     return ListTile(
       leading: const Icon(Icons.info_outline),
       title: const Text('软件版本'),
       subtitle: Text(
-        _appVersion.isEmpty ? '加载中...' : '$_appVersion（点击检查更新）',
+        _appVersion.isEmpty ? '加载中...' : '$_appVersion$flavorLabel（点击检查更新）',
       ),
       onTap: () => _checkForUpdates(),
     );

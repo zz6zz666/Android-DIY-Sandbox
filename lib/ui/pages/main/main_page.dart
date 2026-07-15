@@ -41,6 +41,12 @@ class _MainPageState extends State<MainPage> {
     return t;
   }
 
+  bool get _isCurrentPageWebview {
+    if (_currentIndex < 0 || _currentIndex >= _tabs.length) return false;
+    final page = _tabs[_currentIndex]['page'];
+    return page is Map && '${page['type']}' == 'webview';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -246,7 +252,7 @@ class _MainPageState extends State<MainPage> {
       () => BubbleBackground(
         imagePath: homeController.homeBackgroundPath.value,
         child: Scaffold(
-          resizeToAvoidBottomInset: false,
+          resizeToAvoidBottomInset: _isCurrentPageWebview,
           backgroundColor: Colors.transparent,
           body: _showSettings ? _buildSettingsPage() : _buildMainTabs(),
           bottomNavigationBar: _showSettings ? null : _buildBottomNav(context),
