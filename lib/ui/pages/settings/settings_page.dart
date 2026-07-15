@@ -428,16 +428,22 @@ class _SettingsPageState extends State<SettingsPage> {
         return;
       }
 
-      // 查找与当前构建变体匹配的APK文件名
-      // normal 与 chromium 均带显式风味标记 -normal- / -chromium-
+      // APK 命名: normal 含 -normal- 标记, chromium 含 -chromium- 标记。
+      // (-x-chromium- 确保 chromium APK 在字母序排在 normal 之后, 老客户端安全)
       String? apkFileName;
       for (final asset in assets) {
         final name = asset['name'] as String? ?? '';
         if (!name.endsWith('.apk')) continue;
-        final targetMarker = '-${_buildFlavor}-';
-        if (name.contains(targetMarker)) {
-          apkFileName = name;
-          break;
+        if (_buildFlavor == 'chromium') {
+          if (name.contains('-chromium-')) {
+            apkFileName = name;
+            break;
+          }
+        } else {
+          if (!name.contains('-chromium-')) {
+            apkFileName = name;
+            break;
+          }
         }
       }
 

@@ -106,7 +106,12 @@ android {
     project.android.applicationVariants.all { variant ->
         variant.outputs.each { output ->
             output.versionCodeOverride = flutter.versionCode
+            // -x-chromium 确保在 alphabetically 排序时排在 normal (-normal) 之后
+            // (r < x), 使老客户端 (选第一个 .apk) 优先拿到 normal 版本而非 chromium。
             def flavorTag = "-${variant.productFlavors[0].name}"
+            if (variant.productFlavors[0].name == "chromium") {
+                flavorTag = "-x-chromium"
+            }
             output.outputFileName = "Android-DIY-Sandbox-v${variant.versionName}${flavorTag}-${variant.buildType.name}.apk"
         }
     }
